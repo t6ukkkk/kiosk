@@ -85,26 +85,39 @@ async function loadData() {
   
 console.log("timeline sample:", j.timeline?.[0], "len:", j.timeline?.length);
 
-  // --- timeline data for chart (safe) ---
+  // --- timeline data for chart (safe, supports "18,606" strings) ---
 const timeline = Array.isArray(j.timeline) ? j.timeline : [];
 
-// keep only rows that actually have a valid timestamp + price
-const clean = timeline.filter(t => {
-  const ts = Number(t?.timestamp);
-  const p  = Number(t?.price);
-  return Number.isFinite(ts) && Number.isFinite(p);
-});
+// helpers
+const toNum = (x) => {
+  if (x === null || x === undefined) return NaN;
+  if (typeof x === "number") return x;
+  // handle "18,606" -> 18.606 and also "18.606"
+  const s = String(x).trim().replace(/\s/g, "").replace(",", ".");
+  return parseFloat(s);
+};
 
-// labels: HH:MM from timestamp (seconds -> ms)
-const labels = clean.map(t => {
-  const d = new Date(Number(t.timestamp) * 1000);
+const clean = timeline
+  .map(t => ({
+    ts: toNum(t?.timestamp),
+    price: toNum(t?.price),
+  }))
+  .filter(r => Number.isFinite(r.ts) && Number.isFinite(r.price));
+
+// quick debug (you can remove later)
+document.getElementById("source")?.insertAdjacentHTML(
+  "beforeend",
+  `<span style="opacity:.7"> • points: ${clean.length}/${timeline.length}</span>`
+);
+
+const labels = clean.map(r => {
+  const d = new Date(r.ts * 1000);
   return isNaN(d.getTime())
     ? "—"
     : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 });
 
-// prices: numeric
-const prices = clean.map(t => Number(t.price));
+const prices = clean.map(r => r.price);
 
 drawChart(labels, prices);
 
@@ -155,6 +168,7 @@ setInterval(loadData, 5 * 60 * 1000);
 
 </body>
 </html>
+
 
 
 
