@@ -82,45 +82,15 @@ async function loadData() {
   document.getElementById("avg").textContent = j.avg.toFixed(2);
   document.getElementById("min").textContent = j.min.toFixed(2);
   document.getElementById("max").textContent = j.max.toFixed(2);
-  
-console.log("timeline[0] =", j.timeline?.[0]);
 
-  // --- timeline data for chart (safe, supports "18,606" strings) ---
-const timeline = Array.isArray(j.timeline) ? j.timeline : [];
+  // --- timeline data for chart ---
+  const labels = j.timeline.map(t =>
+    new Date(t.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+  );
 
-// helpers
-const toNum = (x) => {
-  if (x === null || x === undefined) return NaN;
-  if (typeof x === "number") return x;
-  // handle "18,606" -> 18.606 and also "18.606"
-  const s = String(x).trim().replace(/\s/g, "").replace(",", ".");
-  return parseFloat(s);
-};
+  const prices = j.timeline.map(t => t.price);
 
-const clean = timeline
-  .map(t => ({
-    ts: toNum(t?.timestamp),
-    price: toNum(t?.price),
-  }))
-  .filter(r => Number.isFinite(r.ts) && Number.isFinite(r.price));
-
-// quick debug (you can remove later)
-document.getElementById("source")?.insertAdjacentHTML(
-  "beforeend",
-  `<span style="opacity:.7"> • points: ${clean.length}/${timeline.length}</span>`
-);
-
-const labels = clean.map(r => {
-  const d = new Date(r.ts * 1000);
-  return isNaN(d.getTime())
-    ? "—"
-    : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-});
-
-const prices = clean.map(r => r.price);
-
-drawChart(labels, prices);
-
+  drawChart(labels, prices);
 }
 
 function drawChart(labels, data) {
@@ -168,10 +138,6 @@ setInterval(loadData, 5 * 60 * 1000);
 
 </body>
 </html>
-
-
-
-
 
 
 
