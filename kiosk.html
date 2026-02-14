@@ -76,9 +76,7 @@
 
 <script>
   // ✅ PUT YOUR JSON URL HERE:
-  const SRC =
-  "https://corsproxy.io/?" +
-  encodeURIComponent("https://home.macdronic.com/et/elekter/live/1251892/64548ee8659d7c63e31a86753852de0c");
+  const SRC = "https://r.jina.ai/https://home.macdronic.com/et/elekter/live/1251892/64548ee8659d7c63e31a86753852de0c";
   // refresh interval
   const REFRESH_S = 60;
 
@@ -152,8 +150,8 @@
     try{
       const res = await fetch(SRC, { cache: "no-store" });
       if(!res.ok) throw new Error("HTTP " + res.status);
-      const j = await res.json();
-
+      const txt = await res.text();
+const j = JSON.parse(txt);
       // header fields you pasted
       setText("title", j.chartTitle || ("Elektri hind " + (j.day || "")));
       setText("updated", j.DateUpdated ? ("• uuendatud " + j.DateUpdated) : "");
@@ -207,4 +205,5 @@
 
 </body>
 </html>
+
 
