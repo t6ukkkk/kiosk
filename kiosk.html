@@ -7,8 +7,16 @@
   <title>Elektri hind (Macdronic JSON)</title>
   <style>
     :root { color-scheme: dark; }
-    html,body{margin:0;padding:0;font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial;background:#0b0b0c;color:#eaeaea;}
-    header{position:sticky;top:0;z-index:10;background:#0b0b0c;border-bottom:1px solid #222;padding:10px 12px}
+    html,body{
+      margin:0;padding:0;
+      font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial;
+      background:#0b0b0c;color:#eaeaea;
+    }
+    header{
+      position:sticky;top:0;z-index:10;
+      background:#0b0b0c;border-bottom:1px solid #222;
+      padding:10px 12px
+    }
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .pill{display:inline-block;padding:4px 10px;border-radius:999px;background:#16181a;border:1px solid #2a2d31;font-size:12px}
     .muted{opacity:.75;font-size:12px}
@@ -17,13 +25,13 @@
     .card{background:#121416;border:1px solid #24282d;border-radius:14px;padding:10px}
     .k{opacity:.7;font-size:12px;margin-bottom:4px}
     .v{font-size:18px;font-weight:700}
-    .warn{margin-top:10px;background:#1a1410;border:1px solid #3a2a1f;border-radius:14px;padding:10px}
-    .warn a{color:#9ad0ff}
     main{padding:10px 12px}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
     .tag{font-size:12px;opacity:.8}
     .err{color:#ff6b6b}
-    @media (max-width: 900px){ .grid{grid-template-columns:repeat(2,minmax(140px,1fr));} }
+    @media (max-width: 900px){
+      .grid{grid-template-columns:repeat(2,minmax(140px,1fr));}
+    }
   </style>
 </head>
 <body>
@@ -36,25 +44,16 @@
     <span class="pill muted">Auto-refresh: <span id="refresh_s">60</span>s</span>
   </div>
 
-  <div id="alertBox" class="warn" style="display:none;"></div>
-
   <div class="grid">
     <div class="card"><div class="k">Hetkel</div><div class="v"><span id="current" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
     <div class="card"><div class="k">Päeva keskmine</div><div class="v"><span id="avg" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
     <div class="card"><div class="k">Päeva miin</div><div class="v"><span id="min" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
     <div class="card"><div class="k">Päeva maks</div><div class="v"><span id="max" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
   </div>
-
-  <div class="row" style="margin-top:8px">
-    <span class="muted">Allikas:</span>
-    <span id="src" class="muted mono"></span>
-    <span id="status" class="muted"></span>
-  </div>
 </header>
 
 <main>
   <div id="error" class="err"></div>
-
   <div style="height:65vh;">
     <canvas id="priceChart"></canvas>
   </div>
@@ -63,6 +62,7 @@
 <script>
 const SRC = "https://cold-shape-2620.mihkel-pranstibel.workers.dev/";
 let chart;
+let currentBarIndex = -1; // used by glow plugin
 
 function fmt2(n){
   return (Number.isFinite(n) ? n.toFixed(2) : "—");
@@ -87,7 +87,6 @@ function toHourlyAverages(timeline){
     if (!Number.isFinite(ts) || !Number.isFinite(price)) continue;
 
     const d = new Date(ts * 1000);
-    // hour bucket key: YYYY-MM-DD HH
     const key =
       d.getFullYear() + "-" +
       String(d.getMonth()+1).padStart(2,"0") + "-" +
@@ -97,24 +96,23 @@ function toHourlyAverages(timeline){
     const cur = map.get(key) ?? { sum: 0, count: 0, ts: ts };
     cur.sum += price;
     cur.count += 1;
-    if (ts < cur.ts) cur.ts = ts; // earliest for stable ordering
+    if (ts < cur.ts) cur.ts = ts; // earliest timestamp for ordering
     map.set(key, cur);
   }
 
   const rows = [...map.entries()]
-    .map(([key, v]) => ({ key, ts: v.ts, avg: v.sum / v.count }))
+    .map(([key, v]) => ({ ts: v.ts, avg: v.sum / v.count }))
     .sort((a,b) => a.ts - b.ts);
 
-  // 24h label, always "HH:00"
   const labels = rows.map(r => {
     const d = new Date(r.ts * 1000);
-    return String(d.getHours()).padStart(2,"0") + ":00";
+    return String(d.getHours()).padStart(2,"0") + ":00"; // 24h mode
   });
 
   const data = rows.map(r => r.avg);
   const tsList = rows.map(r => r.ts);
 
-  return { labels, data, tsList, points: rows.length };
+  return { labels, data, tsList };
 }
 
 function colorForValue(v){
@@ -124,67 +122,77 @@ function colorForValue(v){
   return "rgba(255, 180, 80, 0.85)";                // orange
 }
 
+// Glow plugin for the selected bar (current hour)
+const glowCurrentBarPlugin = {
+  id: 'glowCurrentBar',
+  beforeDatasetsDraw(chart, args, pluginOptions) {
+    const idx = currentBarIndex;
+    if (idx < 0) return;
+
+    const meta = chart.getDatasetMeta(0);
+    const el = meta?.data?.[idx];
+    if (!el) return;
+
+    const ctx = chart.ctx;
+
+    // Draw a glowing overlay by re-drawing the same bar with shadow
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,255,255,0.85)';
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    // A slightly brighter overlay
+    ctx.globalAlpha = 0.9;
+    const props = el.getProps(['x','y','base','width'], true);
+    const left = props.x - props.width / 2;
+    const top = Math.min(props.y, props.base);
+    const height = Math.abs(props.base - props.y);
+
+    // draw overlay rectangle
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(left - 1, top - 2, props.width + 2, height + 4);
+
+    ctx.restore();
+  }
+};
+
 async function loadData() {
   const errorEl = document.getElementById("error");
   errorEl.textContent = "";
-
-  document.getElementById("src").textContent = SRC;
 
   const r = await fetch(SRC, { cache: "no-store" });
   if (!r.ok) throw new Error("HTTP " + r.status);
 
   const j = await r.json();
 
-  // --- top summary numbers ---
+  // summary
   document.getElementById("current").textContent = fmt2(j.currentPrice);
   document.getElementById("avg").textContent = fmt2(j.avg);
   document.getElementById("min").textContent = fmt2(j.min);
   document.getElementById("max").textContent = fmt2(j.max);
 
-  // optional title/updated/alert (if present)
   if (j.chartTitle) document.getElementById("title").textContent = j.chartTitle;
   if (j.DateUpdated) document.getElementById("updated").textContent = "• uuendatud " + j.DateUpdated;
 
-  const alertBox = document.getElementById("alertBox");
-  const alertHtml = j.alert_info?.text ?? j.alert ?? "";
-  if (alertHtml && typeof alertHtml === "string"){
-    alertBox.style.display = "";
-    alertBox.innerHTML = alertHtml;
-  } else {
-    alertBox.style.display = "none";
-    alertBox.innerHTML = "";
-  }
-
-  // --- hourly averaged timeline for chart ---
   const timeline = Array.isArray(j.timeline) ? j.timeline : [];
-  const { labels, data, tsList, points } = toHourlyAverages(timeline);
-
-  document.getElementById("status").textContent =
-    "• hourly bars: " + points;
+  const { labels, data, tsList } = toHourlyAverages(timeline);
 
   if (!labels.length || !data.length) {
     throw new Error("Graafiku andmeid ei leitud (timeline tühi või väljad ei klapi).");
   }
 
-  // Colors + highlight current hour
+  // set current hour index for glow
   const now = new Date();
+  currentBarIndex = tsList.findIndex(ts => sameLocalHour(ts, now));
+
   const bgColors = data.map(v => colorForValue(v));
 
-  const borderColors = data.map(() => "rgba(0,0,0,0)"); // default: invisible
-  const borderWidths = data.map(() => 0);
-
-  const currentIdx = tsList.findIndex(ts => sameLocalHour(ts, now));
-  if (currentIdx >= 0) {
-    borderColors[currentIdx] = "rgba(255,255,255,0.95)"; // highlight border
-    borderWidths[currentIdx] = 3;
-  }
-
-  drawChart(labels, data, bgColors, borderColors, borderWidths);
+  drawChart(labels, data, bgColors);
 }
 
-function drawChart(labels, data, bgColors, borderColors, borderWidths) {
+function drawChart(labels, data, bgColors) {
   const ctx = document.getElementById("priceChart");
-
   if (chart) chart.destroy();
 
   chart = new Chart(ctx, {
@@ -192,11 +200,10 @@ function drawChart(labels, data, bgColors, borderColors, borderWidths) {
     data: {
       labels,
       datasets: [{
-        label: "senti/kWh",
         data,
         backgroundColor: bgColors,
-        borderColor: borderColors,
-        borderWidth: borderWidths
+        borderWidth: (ctx) => (ctx.dataIndex === currentBarIndex ? 2 : 0),
+        borderColor: (ctx) => (ctx.dataIndex === currentBarIndex ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0)")
       }]
     },
     options: {
@@ -217,10 +224,20 @@ function drawChart(labels, data, bgColors, borderColors, borderWidths) {
         },
         y: {
           beginAtZero: true,
-          title: { display: true, text: "senti/kWh" }
+          ticks: {
+            stepSize: 5   // horizontal lines every 5 cents
+          },
+          grid: {
+            display: true
+          },
+          title: {
+            display: true,
+            text: "senti/kWh"
+          }
         }
       }
-    }
+    },
+    plugins: [glowCurrentBarPlugin]
   });
 }
 
