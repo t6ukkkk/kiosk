@@ -61,8 +61,23 @@
 
 <script>
 const SRC = "https://cold-shape-2620.mihkel-pranstibel.workers.dev/";
+
 let chart;
-let currentBarIndex = -1; // used by glow plugin
+let currentBarIndex = -1;
+
+// Store latest chart state so we can update highlight without re-fetching
+let latest = {
+  labels: [],
+  data: [],
+  tsList: []
+};
+
+// --- UI refresh config ---
+const REFRESH_MS = 60 * 1000;      // fetch JSON every 60s
+const HIGHLIGHT_MS = 15 * 1000;    // re-evaluate current hour every 15s
+
+// show refresh seconds in header (your pill)
+document.getElementById("refresh_s").textContent = String(Math.round(REFRESH_MS / 1000));
 
 function fmt2(n){
   return (Number.isFinite(n) ? n.toFixed(2) : "—");
@@ -76,6 +91,13 @@ function sameLocalHour(tsSeconds, nowDate){
     d.getDate() === nowDate.getDate() &&
     d.getHours() === nowDate.getHours()
   );
+}
+
+function colorForValue(v){
+  if (!Number.isFinite(v)) return "rgba(120,120,120,0.6)";
+  if (v > 18) return "rgba(255, 90, 90, 0.85)";     // red
+  if (v < 11) return "rgba(120, 255, 160, 0.85)";   // green
+  return "rgba(255, 180, 80, 0.85)";                // orange
 }
 
 // Group 15-min points into hourly averages
@@ -106,23 +128,17 @@ function toHourlyAverages(timeline){
 
   const labels = rows.map(r => {
     const d = new Date(r.ts * 1000);
-    return String(d.getHours()).padStart(2,"0") + ":00"; // 24h mode
+    return String(d.getHours()).padStart(2,"0") + ":00"; // 24h
   });
 
-  const data = rows.map(r => r.avg);
-  const tsList = rows.map(r => r.ts);
-
-  return { labels, data, tsList };
+  return {
+    labels,
+    data: rows.map(r => r.avg),
+    tsList: rows.map(r => r.ts)
+  };
 }
 
-function colorForValue(v){
-  if (!Number.isFinite(v)) return "rgba(120,120,120,0.6)";
-  if (v > 18) return "rgba(255, 90, 90, 0.85)";     // red
-  if (v < 11) return "rgba(120, 255, 160, 0.85)";   // green
-  return "rgba(255, 180, 80, 0.85)";                // orange
-}
-
-// Glow plugin for the selected bar (current hour)
+// ---- Spotlight / glow column plugin (you already asked for this) ----
 const glowCurrentBarPlugin = {
   id: 'glowCurrentBar',
   beforeDatasetsDraw(chart) {
@@ -134,8 +150,6 @@ const glowCurrentBarPlugin = {
     if (!el) return;
 
     const ctx = chart.ctx;
-
-    // Chart area bounds
     const area = chart.chartArea;
     if (!area) return;
 
@@ -143,28 +157,24 @@ const glowCurrentBarPlugin = {
     const x = props.x;
     const w = props.width;
 
-    // Wider highlight box than the bar
     const padX = Math.max(8, w * 0.35);
     const left = x - (w / 2) - padX;
     const width = w + padX * 2;
 
-    // Full height highlight (top -> bottom of plotting area)
     const top = area.top;
     const height = area.bottom - area.top;
 
     ctx.save();
 
-    // Outer glow
+    // outer glow
     ctx.shadowColor = 'rgba(255,255,255,0.65)';
     ctx.shadowBlur = 22;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
 
-    // translucent "spotlight" column
+    // spotlight column
     ctx.fillStyle = 'rgba(255,255,255,0.10)';
     ctx.fillRect(left, top, width, height);
 
-    // crisp border for attention
+    // border
     ctx.shadowBlur = 0;
     ctx.strokeStyle = 'rgba(255,255,255,0.35)';
     ctx.lineWidth = 2;
@@ -174,51 +184,33 @@ const glowCurrentBarPlugin = {
   }
 };
 
-async function loadData() {
-  const errorEl = document.getElementById("error");
-  errorEl.textContent = "";
+function recomputeCurrentIndexAndRestyle(){
+  if (!chart || !latest.tsList.length) return;
 
-  const r = await fetch(SRC, { cache: "no-store" });
-  if (!r.ok) throw new Error("HTTP " + r.status);
-
-  const j = await r.json();
-
-  // summary
-  document.getElementById("current").textContent = fmt2(j.currentPrice);
-  document.getElementById("avg").textContent = fmt2(j.avg);
-  document.getElementById("min").textContent = fmt2(j.min);
-  document.getElementById("max").textContent = fmt2(j.max);
-
-  if (j.chartTitle) document.getElementById("title").textContent = j.chartTitle;
-  if (j.DateUpdated) document.getElementById("updated").textContent = "• uuendatud " + j.DateUpdated;
-
-  const timeline = Array.isArray(j.timeline) ? j.timeline : [];
-  const { labels, data, tsList } = toHourlyAverages(timeline);
-
-  if (!labels.length || !data.length) {
-    throw new Error("Graafiku andmeid ei leitud (timeline tühi või väljad ei klapi).");
-  }
-
-  // set current hour index for glow
   const now = new Date();
-  currentBarIndex = tsList.findIndex(ts => sameLocalHour(ts, now));
+  const newIdx = latest.tsList.findIndex(ts => sameLocalHour(ts, now));
 
-const bgColors = data.map((v, i) => {
-  const c = colorForValue(v);
-  // brighten current bar a bit
-  if (i === currentBarIndex) {
-    // add a light overlay effect by increasing alpha
-    // (works because our colors already have alpha)
-    return c.replace(/0\.85\)$/, "0.98)");
-  }
-  return c;
-});
+  // only update if changed (saves work)
+  if (newIdx === currentBarIndex) return;
 
+  currentBarIndex = newIdx;
 
-  drawChart(labels, data, bgColors);
+  // restyle dataset (current bar brighter + white border)
+  const ds = chart.data.datasets[0];
+
+  ds.backgroundColor = latest.data.map((v, i) => {
+    const c = colorForValue(v);
+    if (i === currentBarIndex) return c.replace(/0\.85\)$/, "0.98)");
+    return c;
+  });
+
+  ds.borderWidth = (ctx) => (ctx.dataIndex === currentBarIndex ? 2 : 0);
+  ds.borderColor = (ctx) => (ctx.dataIndex === currentBarIndex ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0)");
+
+  chart.update("none");
 }
 
-function drawChart(labels, data, bgColors) {
+function drawChart(labels, data) {
   const ctx = document.getElementById("priceChart");
   if (chart) chart.destroy();
 
@@ -228,7 +220,11 @@ function drawChart(labels, data, bgColors) {
       labels,
       datasets: [{
         data,
-        backgroundColor: bgColors,
+        backgroundColor: data.map((v, i) => {
+          const c = colorForValue(v);
+          if (i === currentBarIndex) return c.replace(/0\.85\)$/, "0.98)");
+          return c;
+        }),
         borderWidth: (ctx) => (ctx.dataIndex === currentBarIndex ? 2 : 0),
         borderColor: (ctx) => (ctx.dataIndex === currentBarIndex ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0)")
       }]
@@ -237,58 +233,102 @@ function drawChart(labels, data, bgColors) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      plugins: {
-        legend: { display: false }
-      },
-scales: {
-  x: {
-    ticks: {
-      autoSkip: true,
-      maxTicksLimit: 24,
-      minRotation: 90,
-      maxRotation: 90
-    },
-    grid: {
-      display: true,
-      color: 'rgba(255,255,255,0.10)',   // lighter vertical grid
-      lineWidth: 1
-    }
-  },
-  y: {
-    beginAtZero: true,
-    ticks: {
-      stepSize: 5
-    },
-    grid: {
-      display: true,
-      color: 'rgba(255,255,255,0.20)',   // lighter horizontal grid
-      lineWidth: 1
-    },
-    title: {
-      display: true,
-      text: "senti/kWh"
-    }
-  }
-}
-
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: 24,
+            minRotation: 90,
+            maxRotation: 90
+          },
+          grid: {
+            display: true,
+            color: 'rgba(255,255,255,0.1)',
+            lineWidth: 1
+          }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { stepSize: 5 },
+          grid: {
+            display: true,
+            color: 'rgba(255,255,255,0.2)', // a bit brighter than before
+            lineWidth: 1
+          },
+          title: { display: true, text: "senti/kWh" }
+        }
+      }
     },
     plugins: [glowCurrentBarPlugin]
   });
 }
 
-// initial + refresh
+async function loadData() {
+  const errorEl = document.getElementById("error");
+  errorEl.textContent = "";
+
+  // Force bypass any caching
+  const url = SRC + (SRC.includes("?") ? "&" : "?") + "t=" + Date.now();
+
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+
+  const j = await r.json();
+
+  // summary numbers
+  document.getElementById("current").textContent = fmt2(j.currentPrice);
+  document.getElementById("avg").textContent = fmt2(j.avg);
+  document.getElementById("min").textContent = fmt2(j.min);
+  document.getElementById("max").textContent = fmt2(j.max);
+
+  if (j.chartTitle) document.getElementById("title").textContent = j.chartTitle;
+
+  // show local “last updated (fetched)” time so you can verify it’s running
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2,"0");
+  const mm = String(now.getMinutes()).padStart(2,"0");
+  const ss = String(now.getSeconds()).padStart(2,"0");
+  document.getElementById("updated").textContent = `• uuendatud (fetch) ${hh}:${mm}:${ss}`;
+
+  const timeline = Array.isArray(j.timeline) ? j.timeline : [];
+  const { labels, data, tsList } = toHourlyAverages(timeline);
+
+  if (!labels.length || !data.length) {
+    throw new Error("Graafiku andmeid ei leitud (timeline tühi või väljad ei klapi).");
+  }
+
+  latest = { labels, data, tsList };
+
+  // compute current hour index from the NEW data
+  const nowDate = new Date();
+  currentBarIndex = tsList.findIndex(ts => sameLocalHour(ts, nowDate));
+
+  drawChart(labels, data);
+}
+
+// ---- start everything ----
 (async ()=>{
   try { await loadData(); }
   catch(e){ document.getElementById("error").textContent = "Viga: " + (e?.message ?? e); }
 })();
+
+// Fetch refresh (data window shifts / old hours drop off)
 setInterval(async ()=>{
   try { await loadData(); }
   catch(e){ document.getElementById("error").textContent = "Viga: " + (e?.message ?? e); }
-}, 5 * 60 * 1000);
+}, REFRESH_MS);
+
+// Highlight refresh (moves to next hour even if data stays same)
+setInterval(()=>{
+  try { recomputeCurrentIndexAndRestyle(); } catch {}
+}, HIGHLIGHT_MS);
 </script>
+
 
 </body>
 </html>
+
 
 
 
