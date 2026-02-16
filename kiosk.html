@@ -54,6 +54,7 @@
 
 <main>
   <div id="error" class="err"></div>
+
   <div style="height:65vh;">
     <canvas id="priceChart"></canvas>
   </div>
@@ -63,44 +64,97 @@
 const SRC = "https://cold-shape-2620.mihkel-pranstibel.workers.dev/";
 let chart;
 
-function toNumber(x){
-  if (x === null || x === undefined) return NaN;
-  if (typeof x === "number") return x;
-  if (typeof x === "string") {
-    const s = x.trim().replace(",", ".");
-    const n = Number(s);
-    return n;
-  }
-  return NaN;
+function fmt2(n){
+  return (Number.isFinite(n) ? n.toFixed(2) : "—");
 }
 
-function toMillis(ts){
-  if (ts === null || ts === undefined) return NaN;
+// Group 15-min points into hourly averages
+function toHourlyAverages(timeline){
+  const map = new Map(); // key -> {sum, count, ts}
+  for (const t of timeline){
+    const ts = Number(t.startTimestamp ?? t.timestamp);
+    const price = Number(t.price ?? t.value);
+    if (!Number.isFinite(ts) || !Number.isFinite(price)) continue;
 
-  if (typeof ts === "number") {
-    return (ts > 1e12) ? ts : ts * 1000; // ms vs s
+    const d = new Date(ts * 1000);
+    // hour bucket key: YYYY-MM-DD HH
+    const key =
+      d.getFullYear() + "-" +
+      String(d.getMonth()+1).padStart(2,"0") + "-" +
+      String(d.getDate()).padStart(2,"0") + " " +
+      String(d.getHours()).padStart(2,"0");
+
+    const cur = map.get(key) ?? { sum: 0, count: 0, ts: ts };
+    cur.sum += price;
+    cur.count += 1;
+    // keep earliest timestamp for that hour (stable ordering)
+    if (ts < cur.ts) cur.ts = ts;
+    map.set(key, cur);
   }
 
-  if (typeof ts === "string") {
-    const ms = Date.parse(ts);
-    return isNaN(ms) ? NaN : ms;
-  }
+  // sort by timestamp
+  const rows = [...map.entries()]
+    .map(([key, v]) => ({ key, ts: v.ts, avg: v.sum / v.count }))
+    .sort((a,b) => a.ts - b.ts);
 
-  return NaN;
+  const labels = rows.map(r => {
+    const d = new Date(r.ts * 1000);
+    // show "HH:00" (hourly) — cleaner
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  });
+
+  const data = rows.map(r => r.avg);
+  return { labels, data, points: rows.length };
 }
 
-function normalizeTimeline(timeline){
-  if (!timeline) return [];
-  if (Array.isArray(timeline)) return timeline;
-  if (typeof timeline === "object") {
-    const vals = Object.values(timeline);
-    return vals.flatMap(v => Array.isArray(v) ? v : [v]);
+async function loadData() {
+  const errorEl = document.getElementById("error");
+  errorEl.textContent = "";
+
+  document.getElementById("src").textContent = SRC;
+
+  const r = await fetch(SRC, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+
+  const j = await r.json();
+
+  // --- top summary numbers ---
+  document.getElementById("current").textContent = fmt2(j.currentPrice);
+  document.getElementById("avg").textContent = fmt2(j.avg);
+  document.getElementById("min").textContent = fmt2(j.min);
+  document.getElementById("max").textContent = fmt2(j.max);
+
+  // optional title/updated/alert (if present)
+  if (j.chartTitle) document.getElementById("title").textContent = j.chartTitle;
+  if (j.DateUpdated) document.getElementById("updated").textContent = "• uuendatud " + j.DateUpdated;
+
+  const alertBox = document.getElementById("alertBox");
+  const alertHtml = j.alert_info?.text ?? j.alert ?? "";
+  if (alertHtml && typeof alertHtml === "string"){
+    alertBox.style.display = "";
+    alertBox.innerHTML = alertHtml;
+  } else {
+    alertBox.style.display = "none";
+    alertBox.innerHTML = "";
   }
-  return [];
+
+  // --- hourly averaged timeline for chart ---
+  const timeline = Array.isArray(j.timeline) ? j.timeline : [];
+  const { labels, data, points } = toHourlyAverages(timeline);
+
+  document.getElementById("status").textContent =
+    "• hourly bars: " + points;
+
+  if (!labels.length || !data.length) {
+    throw new Error("Graafiku andmeid ei leitud (timeline tühi või väljad ei klapi).");
+  }
+
+  drawChart(labels, data);
 }
 
 function drawChart(labels, data) {
   const ctx = document.getElementById("priceChart");
+
   if (chart) chart.destroy();
 
   chart = new Chart(ctx, {
@@ -117,9 +171,18 @@ function drawChart(labels, data) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false }
+      },
       scales: {
-        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 32 } },
+        x: {
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: 24,     // declutter: max ~24 labels (hours)
+            minRotation: 90,       // vertical labels
+            maxRotation: 90
+          }
+        },
         y: {
           beginAtZero: true,
           title: { display: true, text: "senti/kWh" }
@@ -129,83 +192,14 @@ function drawChart(labels, data) {
   });
 }
 
-async function loadData() {
-  const errorEl = document.getElementById("error");
-  const statusEl = document.getElementById("status");
-  errorEl.textContent = "";
-  statusEl.textContent = "";
-
-  document.getElementById("src").textContent = SRC;
-
-  const r = await fetch(SRC, { cache: "no-store" });
-  if (!r.ok) throw new Error("HTTP " + r.status);
-
-  const j = await r.json();
-
-  if (j.chartTitle) document.getElementById("title").textContent = j.chartTitle;
-  if (j.DateUpdated) document.getElementById("updated").textContent = "• uuendatud " + j.DateUpdated;
-
-  document.getElementById("current").textContent = Number(j.currentPrice ?? j.currentPriceValue ?? 0).toFixed(2);
-  document.getElementById("avg").textContent     = Number(j.avg ?? 0).toFixed(2);
-  document.getElementById("min").textContent     = Number(j.min ?? 0).toFixed(2);
-  document.getElementById("max").textContent     = Number(j.max ?? 0).toFixed(2);
-
-  const tl = normalizeTimeline(j.timeline);
-
-  const first = tl && tl.length ? tl[0] : null;
-  statusEl.textContent =
-    ` • timeline: ${Array.isArray(j.timeline) ? "array" : typeof j.timeline}` +
-    ` • points: ${tl.length}` +
-    (first ? ` • first keys: ${Object.keys(first).slice(0,10).join(",")}` : "");
-
-  // ✅ FIX: use startTimestamp / endTimestamp (Macdronic)
-  const points = tl.map(p => {
-    const ts = toMillis(
-      p.startTimestamp ?? p.timestamp ?? p.startTs ?? p.ts ?? p.time ?? p.datetime
-    );
-
-    const price = toNumber(
-      p.price ?? p.value ?? p.hind ?? p.priceNoTax
-    );
-
-    // labels: prefer startTime like "E 16:00-16:15", else format from ts
-    const lbl = (p.startTime || p.label || p.aeg || p.timeLabel || "") ||
-      (Number.isFinite(ts)
-        ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-        : "");
-
-    return { ts, price, lbl };
-  })
-  .filter(p => Number.isFinite(p.ts) && Number.isFinite(p.price))
-  .sort((a,b) => a.ts - b.ts);
-
-  if (points.length === 0) {
-    if (chart) chart.destroy();
-    errorEl.textContent =
-      "Graafiku andmeid ei leitud. Timeline on olemas, aga ajaväli/hinnaväli ei parsitud. " +
-      "Status real näed 'first keys' — siit saame kohe täpseks timmida.";
-    return;
-  }
-
-  // If startTime exists, use it as x-labels; else use HH:MM from timestamps.
-  const labels = points.map(p => {
-    if (p.lbl && typeof p.lbl === "string" && p.lbl.trim()) return p.lbl;
-    return new Date(p.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  });
-
-  const prices = points.map(p => p.price);
-
-  drawChart(labels, prices);
-}
-
-loadData().catch(e => {
-  document.getElementById("error").textContent = "Viga: " + (e?.message || e);
-});
-
-setInterval(() => {
-  loadData().catch(e => {
-    document.getElementById("error").textContent = "Viga: " + (e?.message || e);
-  });
+// initial + refresh
+(async ()=>{
+  try { await loadData(); }
+  catch(e){ document.getElementById("error").textContent = "Viga: " + (e?.message ?? e); }
+})();
+setInterval(async ()=>{
+  try { await loadData(); }
+  catch(e){ document.getElementById("error").textContent = "Viga: " + (e?.message ?? e); }
 }, 5 * 60 * 1000);
 </script>
 
