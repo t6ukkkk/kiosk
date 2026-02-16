@@ -70,62 +70,56 @@
 
 <script>
 const SRC = "https://cold-shape-2620.mihkel-pranstibel.workers.dev/";
-
 let chart;
 
-function toNum(x) {
-  // supports numbers and strings like "18,606"
+function toNumber(x){
   if (x === null || x === undefined) return NaN;
   if (typeof x === "number") return x;
-  const s = String(x).trim().replace(/\s/g, "").replace(",", ".");
-  return parseFloat(s);
+  if (typeof x === "string") {
+    // handle "16,245" and "16.245" and stray spaces
+    const s = x.trim().replace(",", ".");
+    const n = Number(s);
+    return n;
+  }
+  return NaN;
 }
 
-async function loadData() {
-  try {
-    document.getElementById("src").textContent = SRC;
+function toMillis(ts){
+  // ts could be seconds, millis, or ISO string
+  if (ts === null || ts === undefined) return NaN;
 
-    const r = await fetch(SRC, { cache: "no-store" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const j = await r.json();
-
-    // --- top summary numbers ---
-    document.getElementById("current").textContent = toNum(j.currentPrice).toFixed(2);
-    document.getElementById("avg").textContent = toNum(j.avg).toFixed(2);
-    document.getElementById("min").textContent = toNum(j.min).toFixed(2);
-    document.getElementById("max").textContent = toNum(j.max).toFixed(2);
-
-    // --- timeline data for chart (FIX invalid date) ---
-    const tl = Array.isArray(j.timeline) ? j.timeline : [];
-
-    const clean = tl
-      .map(t => {
-        const ts = toNum(t?.timestamp);
-        const price = toNum(t?.price);
-        return { ts, price };
-      })
-      .filter(r => Number.isFinite(r.ts) && Number.isFinite(r.price));
-
-    const labels = clean.map(r => {
-      const d = new Date(r.ts * 1000);
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    });
-
-    const prices = clean.map(r => r.price);
-
-    drawChart(labels, prices);
-
-    document.getElementById("error").textContent = "";
-    document.getElementById("status").textContent = `✓ ${new Date().toLocaleTimeString()}`;
-  } catch (e) {
-    document.getElementById("error").textContent = "Viga: " + (e?.message || e);
-    document.getElementById("status").textContent = "";
+  if (typeof ts === "number") {
+    // if it's already ms (very large), keep it; otherwise seconds → ms
+    return (ts > 1e12) ? ts : ts * 1000;
   }
+
+  if (typeof ts === "string") {
+    const ms = Date.parse(ts);
+    return isNaN(ms) ? NaN : ms;
+  }
+
+  return NaN;
+}
+
+function normalizeTimeline(timeline){
+  // Accept:
+  // 1) Array of points
+  // 2) Object whose values are arrays (or single points)
+  if (!timeline) return [];
+
+  if (Array.isArray(timeline)) return timeline;
+
+  if (typeof timeline === "object") {
+    const vals = Object.values(timeline);
+    // flatten one level
+    return vals.flatMap(v => Array.isArray(v) ? v : [v]);
+  }
+
+  return [];
 }
 
 function drawChart(labels, data) {
   const ctx = document.getElementById("priceChart");
-
   if (chart) chart.destroy();
 
   chart = new Chart(ctx, {
@@ -142,28 +136,71 @@ function drawChart(labels, data) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      plugins: {
-        legend: { display: false }
-      },
+      plugins: { legend: { display: false } },
       scales: {
-        x: {
-          ticks: { maxRotation: 0 }
-        },
+        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 24 } },
         y: {
           beginAtZero: true,
-          title: {
-            display: true,
-            text: "senti/kWh"
-          }
+          title: { display: true, text: "senti/kWh" }
         }
       }
     }
   });
 }
 
-// initial + refresh
-loadData();
-setInterval(loadData, 5 * 60 * 1000);
+async function loadData() {
+  const errorEl = document.getElementById("error");
+  errorEl.textContent = "";
+
+  document.getElementById("src").textContent = SRC;
+
+  const r = await fetch(SRC, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+
+  const j = await r.json();
+
+  // --- top summary numbers ---
+  document.getElementById("current").textContent = Number(j.currentPrice).toFixed(2);
+  document.getElementById("avg").textContent     = Number(j.avg).toFixed(2);
+  document.getElementById("min").textContent     = Number(j.min).toFixed(2);
+  document.getElementById("max").textContent     = Number(j.max).toFixed(2);
+
+  // --- timeline data for chart (robust) ---
+  const tl = normalizeTimeline(j.timeline);
+
+  const points = tl.map(p => {
+    const ts = toMillis(p.timestamp ?? p.ts ?? p.time ?? p.datetime);
+    const price = toNumber(p.price ?? p.hind ?? p.value);
+    return { ts, price };
+  })
+  .filter(p => Number.isFinite(p.ts) && Number.isFinite(p.price))
+  .sort((a,b) => a.ts - b.ts);
+
+  if (points.length === 0) {
+    if (chart) chart.destroy();
+    errorEl.textContent =
+      "Graafiku andmeid ei leitud (timeline on tühi või timestamp/price formaadis ei klapi). " +
+      "Kontrolli, mis võtmed on timeline elementidel (timestamp/price vs hind vms).";
+    return;
+  }
+
+  const labels = points.map(p =>
+    new Date(p.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  );
+  const prices = points.map(p => p.price);
+
+  drawChart(labels, prices);
+}
+
+loadData().catch(e => {
+  document.getElementById("error").textContent = "Viga: " + (e?.message || e);
+});
+
+setInterval(() => {
+  loadData().catch(e => {
+    document.getElementById("error").textContent = "Viga: " + (e?.message || e);
+  });
+}, 5 * 60 * 1000);
 </script>
 
 </body>
