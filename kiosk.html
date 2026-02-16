@@ -4,7 +4,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Elektri hind (Macdronic JSON)</title>
+  <title>Elektri hind</title>
   <style>
     :root { color-scheme: dark; }
     html,body{
@@ -47,7 +47,7 @@
   <div class="grid">
     <div class="card"><div class="k">Hetkel</div><div class="v"><span id="current" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
     <div class="card"><div class="k">Päeva keskmine</div><div class="v"><span id="avg" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
-    <div class="card"><div class="k">Päeva miin</div><div class="v"><span id="min" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
+    <div class="card"><div class="k">Päeva min</div><div class="v"><span id="min" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
     <div class="card"><div class="k">Päeva maks</div><div class="v"><span id="max" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
   </div>
 </header>
@@ -250,7 +250,7 @@ scales: {
     },
     grid: {
       display: true,
-      color: 'rgba(255,255,255,0.06)',   // lighter vertical grid
+      color: 'rgba(255,255,255,0.5)',   // lighter vertical grid
       lineWidth: 1
     }
   },
@@ -261,7 +261,7 @@ scales: {
     },
     grid: {
       display: true,
-      color: 'rgba(255,255,255,0.10)',   // lighter horizontal grid
+      color: 'rgba(255,255,255,0.5)',   // lighter horizontal grid
       lineWidth: 1
     },
     title: {
@@ -289,4 +289,5 @@ setInterval(async ()=>{
 
 </body>
 </html>
+
 
