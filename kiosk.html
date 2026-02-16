@@ -20,18 +20,10 @@
     .warn{margin-top:10px;background:#1a1410;border:1px solid #3a2a1f;border-radius:14px;padding:10px}
     .warn a{color:#9ad0ff}
     main{padding:10px 12px}
-    table{width:100%;border-collapse:collapse;border:1px solid #24282d;border-radius:14px;overflow:hidden}
-    thead th{position:sticky;top:118px;background:#121416;border-bottom:1px solid #24282d;text-align:left;padding:10px;font-size:12px;opacity:.8}
-    td{padding:10px;border-bottom:1px solid #1e2227;font-size:14px}
-    tr:last-child td{border-bottom:none}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
-    .hi{font-weight:800}
     .tag{font-size:12px;opacity:.8}
-    .right{text-align:right}
-    .ok{color:#7CFF9B}
-    .bad{color:#FF7C7C}
     .err{color:#ff6b6b}
-    @media (max-width: 900px){ .grid{grid-template-columns:repeat(2,minmax(140px,1fr));} thead th{top:164px} }
+    @media (max-width: 900px){ .grid{grid-template-columns:repeat(2,minmax(140px,1fr));} }
   </style>
 </head>
 <body>
@@ -62,7 +54,6 @@
 
 <main>
   <div id="error" class="err"></div>
-
   <div style="height:65vh;">
     <canvas id="priceChart"></canvas>
   </div>
@@ -76,7 +67,7 @@ function toNumber(x){
   if (x === null || x === undefined) return NaN;
   if (typeof x === "number") return x;
   if (typeof x === "string") {
-    // handle "16,245" and "16.245" and stray spaces
+    // "16,245" -> "16.245"
     const s = x.trim().replace(",", ".");
     const n = Number(s);
     return n;
@@ -85,12 +76,10 @@ function toNumber(x){
 }
 
 function toMillis(ts){
-  // ts could be seconds, millis, or ISO string
   if (ts === null || ts === undefined) return NaN;
 
   if (typeof ts === "number") {
-    // if it's already ms (very large), keep it; otherwise seconds → ms
-    return (ts > 1e12) ? ts : ts * 1000;
+    return (ts > 1e12) ? ts : ts * 1000; // ms vs s
   }
 
   if (typeof ts === "string") {
@@ -101,17 +90,33 @@ function toMillis(ts){
   return NaN;
 }
 
+function parseDayDMY(dayStr){
+  // "14.02.2026" or "14.02.2026 13:56"
+  if (!dayStr || typeof dayStr !== "string") return null;
+  const m = dayStr.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if (!m) return null;
+  const dd = Number(m[1]);
+  const mm = Number(m[2]);
+  const yyyy = Number(m[3]);
+  // local time midnight
+  return new Date(yyyy, mm - 1, dd, 0, 0, 0, 0);
+}
+
+function timeFromLabel(label){
+  // "E 16:00-16:15" -> {h:16, m:0}
+  if (!label || typeof label !== "string") return null;
+  const m = label.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return { h: Number(m[1]), min: Number(m[2]) };
+}
+
 function normalizeTimeline(timeline){
-  // Accept:
-  // 1) Array of points
-  // 2) Object whose values are arrays (or single points)
   if (!timeline) return [];
 
   if (Array.isArray(timeline)) return timeline;
 
   if (typeof timeline === "object") {
     const vals = Object.values(timeline);
-    // flatten one level
     return vals.flatMap(v => Array.isArray(v) ? v : [v]);
   }
 
@@ -138,7 +143,7 @@ function drawChart(labels, data) {
       animation: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 24 } },
+        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 32 } },
         y: {
           beginAtZero: true,
           title: { display: true, text: "senti/kWh" }
@@ -150,7 +155,9 @@ function drawChart(labels, data) {
 
 async function loadData() {
   const errorEl = document.getElementById("error");
+  const statusEl = document.getElementById("status");
   errorEl.textContent = "";
+  statusEl.textContent = "";
 
   document.getElementById("src").textContent = SRC;
 
@@ -159,18 +166,45 @@ async function loadData() {
 
   const j = await r.json();
 
-  // --- top summary numbers ---
-  document.getElementById("current").textContent = Number(j.currentPrice).toFixed(2);
-  document.getElementById("avg").textContent     = Number(j.avg).toFixed(2);
-  document.getElementById("min").textContent     = Number(j.min).toFixed(2);
-  document.getElementById("max").textContent     = Number(j.max).toFixed(2);
+  // Header bits (optional, but nice)
+  if (j.chartTitle) document.getElementById("title").textContent = j.chartTitle;
+  if (j.DateUpdated) document.getElementById("updated").textContent = "• uuendatud " + j.DateUpdated;
 
-  // --- timeline data for chart (robust) ---
+  // --- top summary numbers ---
+  document.getElementById("current").textContent = Number(j.currentPrice ?? j.currentPriceValue ?? 0).toFixed(2);
+  document.getElementById("avg").textContent     = Number(j.avg ?? 0).toFixed(2);
+  document.getElementById("min").textContent     = Number(j.min ?? 0).toFixed(2);
+  document.getElementById("max").textContent     = Number(j.max ?? 0).toFixed(2);
+
+  const baseDay = parseDayDMY(j.day) || parseDayDMY(j.DateUpdated) || new Date();
+
   const tl = normalizeTimeline(j.timeline);
 
+  // Quick on-page debug (so we know what we got)
+  const first = tl && tl.length ? tl[0] : null;
+  statusEl.textContent =
+    ` • timeline: ${Array.isArray(j.timeline) ? "array" : typeof j.timeline}` +
+    ` • points: ${tl.length}` +
+    (first ? ` • first keys: ${Object.keys(first).slice(0,8).join(",")}` : "");
+
   const points = tl.map(p => {
-    const ts = toMillis(p.timestamp ?? p.ts ?? p.time ?? p.datetime);
-    const price = toNumber(p.price ?? p.hind ?? p.value);
+    // 1) try timestamp
+    let ts = toMillis(p.timestamp ?? p.ts ?? p.time ?? p.datetime);
+
+    // 2) fallback: parse from label like "E 16:00-16:15" + j.day
+    if (!Number.isFinite(ts)) {
+      const lbl = p.label ?? p.aeg ?? p.timeLabel ?? p.interval ?? p.period;
+      const hm = timeFromLabel(lbl);
+      if (hm && baseDay) {
+        const d = new Date(baseDay.getTime());
+        d.setHours(hm.h, hm.min, 0, 0);
+        ts = d.getTime();
+      }
+    }
+
+    // price field variants
+    const price = toNumber(p.price ?? p.hind ?? p.value ?? p.kwh ?? p.cost);
+
     return { ts, price };
   })
   .filter(p => Number.isFinite(p.ts) && Number.isFinite(p.price))
@@ -179,8 +213,9 @@ async function loadData() {
   if (points.length === 0) {
     if (chart) chart.destroy();
     errorEl.textContent =
-      "Graafiku andmeid ei leitud (timeline on tühi või timestamp/price formaadis ei klapi). " +
-      "Kontrolli, mis võtmed on timeline elementidel (timestamp/price vs hind vms).";
+      "Graafiku andmeid ei leitud. " +
+      "Debug: vaata ülal status-realt (timeline type/points/first keys). " +
+      "Tõenäoliselt on price-väli teise nimega või aeg on ainult 'E 16:00-16:15' kujul.";
     return;
   }
 
