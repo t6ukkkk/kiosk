@@ -68,6 +68,16 @@ function fmt2(n){
   return (Number.isFinite(n) ? n.toFixed(2) : "—");
 }
 
+function sameLocalHour(tsSeconds, nowDate){
+  const d = new Date(tsSeconds * 1000);
+  return (
+    d.getFullYear() === nowDate.getFullYear() &&
+    d.getMonth() === nowDate.getMonth() &&
+    d.getDate() === nowDate.getDate() &&
+    d.getHours() === nowDate.getHours()
+  );
+}
+
 // Group 15-min points into hourly averages
 function toHourlyAverages(timeline){
   const map = new Map(); // key -> {sum, count, ts}
@@ -87,24 +97,31 @@ function toHourlyAverages(timeline){
     const cur = map.get(key) ?? { sum: 0, count: 0, ts: ts };
     cur.sum += price;
     cur.count += 1;
-    // keep earliest timestamp for that hour (stable ordering)
-    if (ts < cur.ts) cur.ts = ts;
+    if (ts < cur.ts) cur.ts = ts; // earliest for stable ordering
     map.set(key, cur);
   }
 
-  // sort by timestamp
   const rows = [...map.entries()]
     .map(([key, v]) => ({ key, ts: v.ts, avg: v.sum / v.count }))
     .sort((a,b) => a.ts - b.ts);
 
+  // 24h label, always "HH:00"
   const labels = rows.map(r => {
     const d = new Date(r.ts * 1000);
-    // show "HH:00" (hourly) — cleaner
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return String(d.getHours()).padStart(2,"0") + ":00";
   });
 
   const data = rows.map(r => r.avg);
-  return { labels, data, points: rows.length };
+  const tsList = rows.map(r => r.ts);
+
+  return { labels, data, tsList, points: rows.length };
+}
+
+function colorForValue(v){
+  if (!Number.isFinite(v)) return "rgba(120,120,120,0.6)";
+  if (v > 18) return "rgba(255, 90, 90, 0.85)";     // red
+  if (v < 11) return "rgba(120, 255, 160, 0.85)";   // green
+  return "rgba(255, 180, 80, 0.85)";                // orange
 }
 
 async function loadData() {
@@ -140,7 +157,7 @@ async function loadData() {
 
   // --- hourly averaged timeline for chart ---
   const timeline = Array.isArray(j.timeline) ? j.timeline : [];
-  const { labels, data, points } = toHourlyAverages(timeline);
+  const { labels, data, tsList, points } = toHourlyAverages(timeline);
 
   document.getElementById("status").textContent =
     "• hourly bars: " + points;
@@ -149,10 +166,23 @@ async function loadData() {
     throw new Error("Graafiku andmeid ei leitud (timeline tühi või väljad ei klapi).");
   }
 
-  drawChart(labels, data);
+  // Colors + highlight current hour
+  const now = new Date();
+  const bgColors = data.map(v => colorForValue(v));
+
+  const borderColors = data.map(() => "rgba(0,0,0,0)"); // default: invisible
+  const borderWidths = data.map(() => 0);
+
+  const currentIdx = tsList.findIndex(ts => sameLocalHour(ts, now));
+  if (currentIdx >= 0) {
+    borderColors[currentIdx] = "rgba(255,255,255,0.95)"; // highlight border
+    borderWidths[currentIdx] = 3;
+  }
+
+  drawChart(labels, data, bgColors, borderColors, borderWidths);
 }
 
-function drawChart(labels, data) {
+function drawChart(labels, data, bgColors, borderColors, borderWidths) {
   const ctx = document.getElementById("priceChart");
 
   if (chart) chart.destroy();
@@ -164,7 +194,9 @@ function drawChart(labels, data) {
       datasets: [{
         label: "senti/kWh",
         data,
-        borderWidth: 1
+        backgroundColor: bgColors,
+        borderColor: borderColors,
+        borderWidth: borderWidths
       }]
     },
     options: {
@@ -178,8 +210,8 @@ function drawChart(labels, data) {
         x: {
           ticks: {
             autoSkip: true,
-            maxTicksLimit: 24,     // declutter: max ~24 labels (hours)
-            minRotation: 90,       // vertical labels
+            maxTicksLimit: 24,
+            minRotation: 90,
             maxRotation: 90
           }
         },
