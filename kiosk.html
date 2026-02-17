@@ -73,7 +73,7 @@ let latest = {
 };
 
 // --- UI refresh config ---
-const REFRESH_MS = 60 * 1000;      // fetch JSON every 60s
+const REFRESH_MS = 30 * 60 * 1000;      // fetch JSON every 60s
 const HIGHLIGHT_MS = 15 * 1000;    // re-evaluate current hour every 15s
 
 // show refresh seconds in header (your pill)
@@ -298,13 +298,46 @@ async function loadData() {
     throw new Error("Graafiku andmeid ei leitud (timeline tühi või väljad ei klapi).");
   }
 
-  latest = { labels, data, tsList };
+latest = { labels, data, tsList };
 
-  // compute current hour index from the NEW data
-  const nowDate = new Date();
-  currentBarIndex = tsList.findIndex(ts => sameLocalHour(ts, nowDate));
+// compute current hour index from the NEW data
+const nowDate = new Date();
+currentBarIndex = tsList.findIndex(ts => sameLocalHour(ts, nowDate));
 
-  drawChart(labels, data);
+// ---- SUMMARY NUMBERS MUST MATCH THE HOURLY BARS (today only) ----
+const todayY = nowDate.getFullYear();
+const todayM = nowDate.getMonth();
+const todayD = nowDate.getDate();
+
+const todayIdx = [];
+for (let i = 0; i < tsList.length; i++) {
+  const d = new Date(tsList[i] * 1000);
+  if (d.getFullYear() === todayY && d.getMonth() === todayM && d.getDate() === todayD) {
+    todayIdx.push(i);
+  }
+}
+// fallback if something odd
+const idxToUse = todayIdx.length ? todayIdx : tsList.map((_, i) => i);
+
+const valsToday = idxToUse.map(i => data[i]).filter(Number.isFinite);
+
+const minV = Math.min(...valsToday);
+const maxV = Math.max(...valsToday);
+const avgV = valsToday.reduce((a,b)=>a+b,0) / (valsToday.length || 1);
+
+// "current" = the highlighted bar, if found; else last available today
+let curIdx = currentBarIndex;
+if (curIdx < 0) curIdx = idxToUse[idxToUse.length - 1];
+
+const curV = Number.isFinite(data[curIdx]) ? data[curIdx] : NaN;
+
+document.getElementById("current").textContent = fmt2(curV);
+document.getElementById("avg").textContent = fmt2(avgV);
+document.getElementById("min").textContent = fmt2(minV);
+document.getElementById("max").textContent = fmt2(maxV);
+
+drawChart(labels, data);
+
 }
 
 // ---- start everything ----
@@ -328,6 +361,7 @@ setInterval(()=>{
 
 </body>
 </html>
+
 
 
 
