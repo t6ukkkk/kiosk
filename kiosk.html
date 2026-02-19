@@ -304,11 +304,16 @@ latest = { labels, data, tsList };
 const nowDate = new Date();
 currentBarIndex = tsList.findIndex(ts => sameLocalHour(ts, nowDate));
 
-// ---- SUMMARY NUMBERS MUST MATCH THE HOURLY BARS (today only) ----
+// ---- SUMMARY NUMBERS ----
+// Avg = full-day (today 00:00 -> end of day)
+// Min/Max = remaining day (current hour -> end of day)
+
+const nowDate = new Date();
 const todayY = nowDate.getFullYear();
 const todayM = nowDate.getMonth();
 const todayD = nowDate.getDate();
 
+// indices that belong to TODAY (midnight..23:xx)
 const todayIdx = [];
 for (let i = 0; i < tsList.length; i++) {
   const d = new Date(tsList[i] * 1000);
@@ -316,19 +321,31 @@ for (let i = 0; i < tsList.length; i++) {
     todayIdx.push(i);
   }
 }
+
 // fallback if something odd
-const idxToUse = todayIdx.length ? todayIdx : tsList.map((_, i) => i);
+const idxToday = todayIdx.length ? todayIdx : tsList.map((_, i) => i);
 
-const valsToday = idxToUse.map(i => data[i]).filter(Number.isFinite);
+// FULL-DAY avg
+const valsFullDay = idxToday.map(i => data[i]).filter(Number.isFinite);
+const avgV = valsFullDay.reduce((a,b)=>a+b,0) / (valsFullDay.length || 1);
 
-const minV = Math.min(...valsToday);
-const maxV = Math.max(...valsToday);
-const avgV = valsToday.reduce((a,b)=>a+b,0) / (valsToday.length || 1);
+// REMAINING-DAY min/max (from current hour onwards)
+let startIdx = currentBarIndex;
 
-// "current" = the highlighted bar, if found; else last available today
-let curIdx = currentBarIndex;
-if (curIdx < 0) curIdx = idxToUse[idxToUse.length - 1];
+// If the current hour bar isn't found (rare), approximate using "today indices at/after current hour"
+if (startIdx < 0) {
+  const h = nowDate.getHours();
+  startIdx = idxToday.find(i => (new Date(tsList[i] * 1000)).getHours() >= h) ?? idxToday[0];
+}
 
+const idxRemaining = idxToday.filter(i => i >= startIdx);
+const valsRemaining = idxRemaining.map(i => data[i]).filter(Number.isFinite);
+
+const minV = Math.min(...valsRemaining);
+const maxV = Math.max(...valsRemaining);
+
+// CURRENT = highlighted bar (or first remaining bar)
+const curIdx = (currentBarIndex >= 0 ? currentBarIndex : idxRemaining[0]);
 const curV = Number.isFinite(data[curIdx]) ? data[curIdx] : NaN;
 
 document.getElementById("current").textContent = fmt2(curV);
@@ -361,6 +378,7 @@ setInterval(()=>{
 
 </body>
 </html>
+
 
 
 
