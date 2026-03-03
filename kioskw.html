@@ -490,7 +490,7 @@ const forecaStyleOverlay = {
     ctx.fillStyle = "#111";
     for (let i = 0; i < chart.data.labels.length; i++){
       const x = xScale.getPixelForTick(i);
-      ctx.fillText(icons[i] ?? "•", x, chartArea.top - 22);
+     ctx.fillText(icons[i] ?? "•", x, chartArea.top - 10);
     }
 
     // Wind row (bottom) - BLACK text
@@ -565,22 +565,24 @@ const pMax = maxP > 10 ? nextStep2(maxP) : 10;
           barPercentage: 0.9,
           categoryPercentage: 0.95
         },
-        {
-          type: "line",
-          yAxisID: "yT",
-          data: temps,
-          tension: 0.35,
-          pointRadius: 0,
-          borderWidth: 2,
-        segment: {
-  borderColor: (ctx) => {
-    const y0 = ctx.p0.parsed.y;
-    const y1 = ctx.p1.parsed.y;
-    const mid = (y0 + y1) / 2;
-    return (mid < 0) ? "#1f77ff" : "#d92626";
-  }
+  {
+  type: "line",
+  yAxisID: "yT",
+  data: temps.map(v => (Number.isFinite(v) && v >= 0) ? v : null),
+  tension: 0.35,
+  pointRadius: 0,
+  borderWidth: 2,
+  borderColor: "#d92626"
+},
+{
+  type: "line",
+  yAxisID: "yT",
+  data: temps.map(v => (Number.isFinite(v) && v < 0) ? v : null),
+  tension: 0.35,
+  pointRadius: 0,
+  borderWidth: 2,
+  borderColor: "#1f77ff"
 }
-        }
       ]
     },
     options: {
@@ -601,7 +603,7 @@ const pMax = maxP > 10 ? nextStep2(maxP) : 10;
             maxRotation: 0,
             minRotation: 0,
             font: { size: 11 },
-            padding: 18             // create space between ticks and icons
+            padding: 26             // create space between ticks and icons
           },
           grid: {
   lineWidth: (ctx) => {
