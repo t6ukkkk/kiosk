@@ -389,7 +389,12 @@ function iconForCodeNight(code){
   if (c >= 95 && c <= 99) return "⛈️";
   return "🌙";
 }
-
+function windToMs(v){
+  const n = Number(v);
+  if (!Number.isFinite(n)) return NaN;
+  // fallback conversion if API still returns km/h
+  return (n > 20) ? (n / 3.6) : n;
+}
 function pad2(n){ return String(n).padStart(2,"0"); }
 function localHourKey(d){
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}`;
@@ -730,57 +735,58 @@ async function loadWeather(){
   const errEl = document.getElementById("w_error");
   if (errEl) errEl.textContent = "";
 
-  // Open-Meteo hourly; 7 days; local timezone
-  const url =
-  "https://api.open-meteo.com/v1/forecast" +
-  `?latitude=${LAT}&longitude=${LON}` +
-  "&current=temperature_2m,wind_speed_10m" +
-  "&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code" +
-  "&wind_speed_unit=ms" +
-  "&timezone=Europe%2FTallinn" +
-  "&forecast_days=7" +
-  "&t=" + Date.now();
-  
-  const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error("Weather HTTP " + r.status);
-  const j = await r.json();
+  try {
+    const url =
+      "https://api.open-meteo.com/v1/forecast" +
+      `?latitude=${LAT}&longitude=${LON}` +
+      "&current=temperature_2m,wind_speed_10m" +
+      "&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code" +
+      "&wind_speed_unit=ms" +
+      "&timezone=Europe%2FTallinn" +
+      "&forecast_days=7" +
+      "&t=" + Date.now();
 
-  const now = new Date();
-  document.getElementById("w_now").textContent  = wfmt1(j?.current?.temperature_2m);
-  document.getElementById("w_wind").textContent = wfmt1(windToMs(j?.current?.wind_speed_10m));
-function windToMs(v){
-  const n = Number(v);
-  if (!Number.isFinite(n)) return NaN;
-  // If it's suspiciously high for m/s (e.g., 24.8), it might be km/h.
-  // Convert if above 20 (very rare sustained m/s in forecasts).
-  return (n > 20) ? (n / 3.6) : n;
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) throw new Error("Weather HTTP " + r.status);
+    const j = await r.json();
+
+    const now = new Date();
+
+    const hTime = j?.hourly?.time || [];
+    const hTemp = j?.hourly?.temperature_2m || [];
+    const hPrec = j?.hourly?.precipitation || [];
+    const hWind = j?.hourly?.wind_speed_10m || [];
+    const hCode = j?.hourly?.weather_code || [];
+
+    // current cards
+    document.getElementById("w_now").textContent  = wfmt1(j?.current?.temperature_2m);
+    document.getElementById("w_wind").textContent = wfmt1(windToMs(j?.current?.wind_speed_10m));
+
+    // find current hour index by LOCAL "YYYY-MM-DDTHH"
+    const keyNow =
+      `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}T${String(now.getHours()).padStart(2,"0")}`;
+
+    let hIdx = hTime.findIndex(t => String(t).slice(0,13) === keyNow);
+    if (hIdx < 0) hIdx = 0;
+
+    document.getElementById("w_precip").textContent = wfmt1(Number(hPrec[hIdx]));
+    document.getElementById("w_next").textContent   = wfmt1(Number(hTemp[hIdx + 1]));
+
+    document.getElementById("w_updated").textContent =
+      `• uuendatud (fetch) ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+
+    // convert winds to m/s (extra safety)
+    const hWindMs = (hWind || []).map(windToMs);
+
+    // build + draw series
+    const series = buildWeatherSeries3h(hTime, hTemp, hPrec, hWindMs, hCode);
+    drawWeatherForecaLike(series);
+
+  } catch(e){
+    if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
+    throw e;
+  }
 }
-  const hTime = j?.hourly?.time || [];
-  const hTemp = j?.hourly?.temperature_2m || [];
-  const hPrec = j?.hourly?.precipitation || [];
-  const hWind = j?.hourly?.wind_speed_10m || [];
-  const hCode = j?.hourly?.weather_code || [];
-
-  // 1h precip + next hour temp (best effort)
-  const isoLocalHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours())
-    .toISOString().slice(0,13);
-  let hIdx = hTime.findIndex(t => String(t).slice(0,13) === isoLocalHour);
-  if (hIdx < 0) hIdx = 0;
-
-  document.getElementById("w_precip").textContent = wfmt1(Number(hPrec[hIdx]));
-  document.getElementById("w_next").textContent   = wfmt1(Number(hTemp[hIdx + 1]));
-
-  document.getElementById("w_updated").textContent =
-    `• uuendatud (fetch) ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
-const hWindMs = (hWind || []).map(windToMs);
-
-// NEW builder that makes 3h temp line + crossings, but keeps 6h ticks for bars/icons/wind
-const series = buildWeatherSeries3h(hTime, hTemp, hPrec, hWindMs, hCode);
-
-// NEW drawer expects the whole series object
-drawWeatherForecaLike(series);
-}
-
 /* ===================== SCREEN ROTATION ===================== */
 const ROTATE_MS = 0.25 * 60 * 1000; // 5 minutes
 let showing = 0; // 0=electricity, 1=weather
