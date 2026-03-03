@@ -482,36 +482,38 @@ const forecaStyleOverlay = {
       const txt = dayTop[i];
       if (!txt) continue;
       const x = xScale.getPixelForTick(i);
-      ctx.fillText(txt, x, chartArea.top - 46);
+      ctx.fillText(txt, x, chartArea.top - 58);
     }
 
-    // Icons row (below the hour ticks line)
+    // Icons row (below hour ticks)
     ctx.font = "16px -apple-system, system-ui, Segoe UI, Roboto, Arial";
+    ctx.fillStyle = "#111";
     for (let i = 0; i < chart.data.labels.length; i++){
       const x = xScale.getPixelForTick(i);
-      ctx.fillText(icons[i] ?? "•", x, chartArea.top - 18);
+      ctx.fillText(icons[i] ?? "•", x, chartArea.top - 22);
     }
 
-    // Wind row (bottom)
+    // Wind row (bottom) - BLACK text
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
-    ctx.fillStyle = "#2a9d55";
+    ctx.fillStyle = "#111";
     for (let i = 0; i < chart.data.labels.length; i++){
       const x = xScale.getPixelForTick(i);
       const w = winds[i];
       const txt = Number.isFinite(w) ? String(Math.round(w)) : "—";
-      ctx.fillText(txt, x, chartArea.bottom + 26);
+      ctx.fillText(txt, x, chartArea.bottom + 30);
     }
-    ctx.textAlign = "left";
-    ctx.fillText("m/s", chartArea.left, chartArea.bottom + 26);
 
     // units
+    ctx.textAlign = "left";
+    ctx.fillText("m/s", chartArea.left, chartArea.bottom + 30);
+
     ctx.fillStyle = "#2a70ff";
     ctx.textAlign = "right";
-    ctx.fillText("mm", chartArea.right, chartArea.bottom + 10);
+    ctx.fillText("mm", chartArea.right, chartArea.bottom + 12);
 
     ctx.fillStyle = "#111";
     ctx.textAlign = "left";
-    ctx.fillText("°C", chartArea.left, chartArea.bottom + 10);
+    ctx.fillText("°C", chartArea.left, chartArea.bottom + 12);
 
     ctx.restore();
   }
@@ -538,11 +540,17 @@ const forecaStyleOverlay = {
     ctx.restore();
   }
 };
+  function nextStep2(x){
+  if (!Number.isFinite(x)) return 10;
+  return Math.ceil(x / 2) * 2;
+}
 function drawWeatherForecaLike(labelsHour, dayTop, temps, precip6h, winds, icons){
   const canvas = document.getElementById("weatherForecaChart");
   if (!canvas) return;
 
   if (weatherForecaChart) weatherForecaChart.destroy();
+  const maxP = Math.max(0, ...precip6h.filter(v => Number.isFinite(v)));
+const pMax = maxP > 10 ? nextStep2(maxP) : 10;
 
   weatherForecaChart = new Chart(canvas, {
     data: {
@@ -564,13 +572,14 @@ function drawWeatherForecaLike(labelsHour, dayTop, temps, precip6h, winds, icons
           tension: 0.35,
           pointRadius: 0,
           borderWidth: 2,
-          segment: {
-            borderColor: (ctx) => {
-              const y0 = ctx.p0.parsed.y;
-              const y1 = ctx.p1.parsed.y;
-              return (y0 < 0 && y1 < 0) ? "#1f77ff" : "#d92626";
-            }
-          }
+        segment: {
+  borderColor: (ctx) => {
+    const y0 = ctx.p0.parsed.y;
+    const y1 = ctx.p1.parsed.y;
+    const mid = (y0 + y1) / 2;
+    return (mid < 0) ? "#1f77ff" : "#d92626";
+  }
+}
         }
       ]
     },
@@ -582,10 +591,7 @@ function drawWeatherForecaLike(labelsHour, dayTop, temps, precip6h, winds, icons
         legend: { display: false },
         forecaStyleOverlay: { icons, winds, dayTop }
       },
-      layout: {
-        // room for: day label + hour ticks + icons (top), and wind row (bottom)
-        padding: { top: 64, bottom: 38, left: 8, right: 8 }
-      },
+     layout: { padding: { top: 78, bottom: 54, left: 10, right: 10 } },
       scales: {
         x: {
           position: "top",           // <-- hours at top
@@ -595,23 +601,36 @@ function drawWeatherForecaLike(labelsHour, dayTop, temps, precip6h, winds, icons
             maxRotation: 0,
             minRotation: 0,
             font: { size: 11 },
-            padding: 10             // create space between ticks and icons
+            padding: 18             // create space between ticks and icons
           },
-          grid: { color: "rgba(0,0,0,0.08)", lineWidth: 1 }
+          grid: {
+  lineWidth: (ctx) => {
+    const label = ctx.chart.data.labels[ctx.index];
+    return label === "00" ? 2 : 1;
+  },
+  color: (ctx) => {
+    const label = ctx.chart.data.labels[ctx.index];
+    return label === "00"
+      ? "rgba(0,0,0,0.35)"   // darker midnight divider
+      : "rgba(0,0,0,0.08)";  // normal grid
+  }
+}
         },
         yT: {
           position: "left",
           ticks: { color: "#111" },
           grid: { color: "rgba(0,0,0,0.10)" }
         },
-        yP: {
-          position: "right",
-          ticks: {
-            color: "#2a70ff",
-            stepSize: 2              // <-- fixed 2mm intervals
-          },
-          grid: { drawOnChartArea: false }
-        }
+yP: {
+  position: "right",
+  min: 0,
+  suggestedMax: pMax,
+  ticks: {
+    color: "#2a70ff",
+    stepSize: 2
+  },
+  grid: { drawOnChartArea: false }
+}
       }
     },
     plugins: [forecaStyleOverlay, zeroCLinePlugin]
