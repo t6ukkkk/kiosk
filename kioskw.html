@@ -1,14 +1,14 @@
 <!doctype html>
 <html lang="et">
 <head>
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Elektrihind">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Elektrihind">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <title>Elektri hind</title>
+
   <style>
     :root { color-scheme: dark; }
     html,body{
@@ -27,7 +27,7 @@
     .big{font-size:22px;font-weight:700}
     .grid{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;margin-top:10px}
     .card{background:#121416;border:1px solid #24282d;border-radius:14px;padding:10px}
-    .k{opacity:.7;font-size:12px;margin-bottom:4px}
+    .k{opacity:.7;font-size:12px;margin-bottom:6px}
     .v{font-size:18px;font-weight:700}
     main{padding:10px 12px}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
@@ -38,41 +38,37 @@
     }
   </style>
 </head>
+
 <body>
+
+<!-- ===================== ELECTRICITY SCREEN ===================== -->
 <div id="screen-electricity">
-<header>
-  <div class="row">
-    <span class="pill">Macdronic → tabel</span>
-    <span id="title" class="big">Laen…</span>
-    <span id="updated" class="muted"></span>
-    <span class="pill muted">Auto-refresh: <span id="refresh_s">60</span>s</span>
-  </div>
+  <header>
+    <div class="row">
+      <span class="pill">Macdronic → tabel</span>
+      <span id="title" class="big">Laen…</span>
+      <span id="updated" class="muted"></span>
+      <span class="pill muted">Auto-refresh: <span id="refresh_s">60</span>s</span>
+    </div>
 
-  <div class="grid">
-    <div class="card"><div class="k">Hetkel</div><div class="v"><span id="current" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
-    <div class="card"><div class="k">Päeva keskmine</div><div class="v"><span id="avg" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
-    <div class="card"><div class="k">Päeva min</div><div class="v"><span id="min" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
-    <div class="card"><div class="k">Päeva maks</div><div class="v"><span id="max" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
-  </div>
-</header>
+    <div class="grid">
+      <div class="card"><div class="k">Hetkel</div><div class="v"><span id="current" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
+      <div class="card"><div class="k">Päeva keskmine</div><div class="v"><span id="avg" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
+      <div class="card"><div class="k">Päeva min</div><div class="v"><span id="min" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
+      <div class="card"><div class="k">Päeva maks</div><div class="v"><span id="max" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
+    </div>
+  </header>
 
-<main>
-  <div id="w_error" class="err"></div>
-
-  <div class="card" style="height:42vh;">
-    <div class="k">10 päeva: temperatuur + sademed</div>
-    <canvas id="weatherDailyChart"></canvas>
-  </div>
-
-  <div style="height:10px;"></div>
-
-  <div class="card" style="height:28vh;">
-    <div class="k">10 päeva: tuul (m/s)</div>
-    <canvas id="weatherWindChart"></canvas>
-  </div>
-</main>
+  <main>
+    <div id="error" class="err"></div>
+    <div style="height:65vh;">
+      <canvas id="priceChart"></canvas>
+    </div>
+  </main>
 </div>
-  <div id="screen-weather" style="display:none;">
+
+<!-- ===================== WEATHER SCREEN ===================== -->
+<div id="screen-weather" style="display:none;">
   <header>
     <div class="row">
       <span class="pill">Ilm → Tallinn</span>
@@ -83,29 +79,35 @@
 
     <div class="grid">
       <div class="card"><div class="k">Hetkel</div><div class="v"><span id="w_now" class="mono">—</span> <span class="tag">°C</span></div></div>
-      <div class="card"><div class="k">Tuul</div><div class="v"><span id="w_wind" class="mono">—</span> <span class="tag">m/s</span></div></div>
+      <div class="card"><div class="k">Tuul (hetkel)</div><div class="v"><span id="w_wind" class="mono">—</span> <span class="tag">m/s</span></div></div>
       <div class="card"><div class="k">Sademed (1h)</div><div class="v"><span id="w_precip" class="mono">—</span> <span class="tag">mm</span></div></div>
       <div class="card"><div class="k">Järgmine tund</div><div class="v"><span id="w_next" class="mono">—</span> <span class="tag">°C</span></div></div>
     </div>
   </header>
 
   <main>
-    
     <div id="w_error" class="err"></div>
-    <div class="card">
-      <div class="k">Järgmised 12h (°C / mm)</div>
-      <div id="w_12h" class="mono" style="white-space:pre-wrap; line-height:1.4;"></div>
+
+    <div class="card" style="height:42vh;">
+      <div class="k">10 päeva: temperatuur + sademed</div>
+      <canvas id="weatherDailyChart"></canvas>
+    </div>
+
+    <div style="height:10px;"></div>
+
+    <div class="card" style="height:28vh;">
+      <div class="k">10 päeva: tuul (m/s)</div>
+      <canvas id="weatherWindChart"></canvas>
     </div>
   </main>
 </div>
 
 <script>
+/* ===================== ELECTRICITY ===================== */
 const SRC = "https://cold-shape-2620.mihkel-pranstibel.workers.dev/";
 
 let chart;
 let currentBarIndex = -1;
-let weatherDailyChart;
-let weatherWindChart;
 
 // Store latest chart state so we can update highlight without re-fetching
 let latest = {
@@ -115,10 +117,10 @@ let latest = {
 };
 
 // --- UI refresh config ---
-const REFRESH_MS = 30 * 60 * 1000;      // fetch JSON every 60s
-const HIGHLIGHT_MS = 15 * 1000;    // re-evaluate current hour every 15s
+const REFRESH_MS = 30 * 60 * 1000;   // 30 minutes
+const HIGHLIGHT_MS = 15 * 1000;      // re-evaluate current hour every 15s
 
-// show refresh seconds in header (your pill)
+// show refresh seconds in header
 document.getElementById("refresh_s").textContent = String(Math.round(REFRESH_MS / 1000));
 
 function fmt2(n){
@@ -180,7 +182,7 @@ function toHourlyAverages(timeline){
   };
 }
 
-// ---- Spotlight / glow column plugin (you already asked for this) ----
+// ---- Spotlight / glow column plugin ----
 const glowCurrentBarPlugin = {
   id: 'glowCurrentBar',
   beforeDatasetsDraw(chart) {
@@ -207,21 +209,15 @@ const glowCurrentBarPlugin = {
     const height = area.bottom - area.top;
 
     ctx.save();
-
-    // outer glow
     ctx.shadowColor = 'rgba(255,255,255,0.65)';
     ctx.shadowBlur = 22;
-
-    // spotlight column
     ctx.fillStyle = 'rgba(255,255,255,0.10)';
     ctx.fillRect(left, top, width, height);
 
-    // border
     ctx.shadowBlur = 0;
     ctx.strokeStyle = 'rgba(255,255,255,0.35)';
     ctx.lineWidth = 2;
     ctx.strokeRect(left + 1, top + 1, width - 2, height - 2);
-
     ctx.restore();
   }
 };
@@ -232,12 +228,9 @@ function recomputeCurrentIndexAndRestyle(){
   const now = new Date();
   const newIdx = latest.tsList.findIndex(ts => sameLocalHour(ts, now));
 
-  // only update if changed (saves work)
   if (newIdx === currentBarIndex) return;
-
   currentBarIndex = newIdx;
 
-  // restyle dataset (current bar brighter + white border)
   const ds = chart.data.datasets[0];
 
   ds.backgroundColor = latest.data.map((v, i) => {
@@ -295,7 +288,7 @@ function drawChart(labels, data) {
           ticks: { stepSize: 5 },
           grid: {
             display: true,
-            color: 'rgba(255,255,255,0.2)', // a bit brighter than before
+            color: 'rgba(255,255,255,0.2)',
             lineWidth: 1
           },
           title: { display: true, text: "senti/kWh" }
@@ -310,7 +303,6 @@ async function loadData() {
   const errorEl = document.getElementById("error");
   errorEl.textContent = "";
 
-  // Force bypass any caching
   const url = SRC + (SRC.includes("?") ? "&" : "?") + "t=" + Date.now();
 
   const r = await fetch(url, { cache: "no-store" });
@@ -318,15 +310,8 @@ async function loadData() {
 
   const j = await r.json();
 
-  // summary numbers
-  document.getElementById("current").textContent = fmt2(j.currentPrice);
-  document.getElementById("avg").textContent = fmt2(j.avg);
-  document.getElementById("min").textContent = fmt2(j.min);
-  document.getElementById("max").textContent = fmt2(j.max);
-
   if (j.chartTitle) document.getElementById("title").textContent = j.chartTitle;
 
-  // show local “last updated (fetched)” time so you can verify it’s running
   const now = new Date();
   const hh = String(now.getHours()).padStart(2,"0");
   const mm = String(now.getMinutes()).padStart(2,"0");
@@ -335,88 +320,88 @@ async function loadData() {
 
   const timeline = Array.isArray(j.timeline) ? j.timeline : [];
   const { labels, data, tsList } = toHourlyAverages(timeline);
+  if (!labels.length || !data.length) throw new Error("Graafiku andmeid ei leitud (timeline tühi või väljad ei klapi).");
 
-  if (!labels.length || !data.length) {
-    throw new Error("Graafiku andmeid ei leitud (timeline tühi või väljad ei klapi).");
+  latest = { labels, data, tsList };
+
+  // compute current hour index from NEW data
+  const nowDate = new Date();
+  currentBarIndex = tsList.findIndex(ts => sameLocalHour(ts, nowDate));
+
+  // ---- SUMMARY NUMBERS MUST MATCH HOURLY BARS (today only) ----
+  const todayY = nowDate.getFullYear();
+  const todayM = nowDate.getMonth();
+  const todayD = nowDate.getDate();
+
+  const todayIdx = [];
+  for (let i = 0; i < tsList.length; i++) {
+    const d = new Date(tsList[i] * 1000);
+    if (d.getFullYear() === todayY && d.getMonth() === todayM && d.getDate() === todayD) todayIdx.push(i);
   }
 
-latest = { labels, data, tsList };
+  const idxToUse = todayIdx.length ? todayIdx : tsList.map((_, i) => i);
+  const valsToday = idxToUse.map(i => data[i]).filter(Number.isFinite);
 
-// compute current hour index from the NEW data
-const nowDate = new Date();
-currentBarIndex = tsList.findIndex(ts => sameLocalHour(ts, nowDate));
+  const minV = Math.min(...valsToday);
+  const maxV = Math.max(...valsToday);
+  const avgV = valsToday.reduce((a,b)=>a+b,0) / (valsToday.length || 1);
 
-// ---- SUMMARY NUMBERS MUST MATCH THE HOURLY BARS (today only) ----
-const todayY = nowDate.getFullYear();
-const todayM = nowDate.getMonth();
-const todayD = nowDate.getDate();
+  let curIdx = currentBarIndex;
+  if (curIdx < 0) curIdx = idxToUse[idxToUse.length - 1];
+  const curV = Number.isFinite(data[curIdx]) ? data[curIdx] : NaN;
 
-const todayIdx = [];
-for (let i = 0; i < tsList.length; i++) {
-  const d = new Date(tsList[i] * 1000);
-  if (d.getFullYear() === todayY && d.getMonth() === todayM && d.getDate() === todayD) {
-    todayIdx.push(i);
-  }
+  document.getElementById("current").textContent = fmt2(curV);
+  document.getElementById("avg").textContent = fmt2(avgV);
+  document.getElementById("min").textContent = fmt2(minV);
+  document.getElementById("max").textContent = fmt2(maxV);
+
+  drawChart(labels, data);
 }
-// fallback if something odd
-const idxToUse = todayIdx.length ? todayIdx : tsList.map((_, i) => i);
 
-const valsToday = idxToUse.map(i => data[i]).filter(Number.isFinite);
+/* ===================== WEATHER (Open-Meteo) ===================== */
+let weatherDailyChart;
+let weatherWindChart;
 
-const minV = Math.min(...valsToday);
-const maxV = Math.max(...valsToday);
-const avgV = valsToday.reduce((a,b)=>a+b,0) / (valsToday.length || 1);
+const WEATHER_REFRESH_MS = 30 * 60 * 1000; // 30 minutes
+const LAT = 59.437;     // Tallinn
+const LON = 24.7536;
 
-// "current" = the highlighted bar, if found; else last available today
-let curIdx = currentBarIndex;
-if (curIdx < 0) curIdx = idxToUse[idxToUse.length - 1];
+function wfmt1(n){ return (Number.isFinite(n) ? Number(n).toFixed(1) : "—"); }
 
-const curV = Number.isFinite(data[curIdx]) ? data[curIdx] : NaN;
-
-document.getElementById("current").textContent = fmt2(curV);
-document.getElementById("avg").textContent = fmt2(avgV);
-document.getElementById("min").textContent = fmt2(minV);
-document.getElementById("max").textContent = fmt2(maxV);
-
-drawChart(labels, data);
 function drawWeatherDaily(labels, tMax, tMin, pSum){
-  const ctx = document.getElementById("weatherDailyChart");
-  if (!ctx) return;
+  const canvas = document.getElementById("weatherDailyChart");
+  if (!canvas) return;
 
   if (weatherDailyChart) weatherDailyChart.destroy();
 
-  weatherDailyChart = new Chart(ctx, {
-    type: "bar",
+  weatherDailyChart = new Chart(canvas, {
     data: {
       labels,
       datasets: [
-        // precipitation bars (right axis)
         {
           type: "bar",
           label: "Sademed (mm)",
           yAxisID: "yP",
-          data: pSum.map(Number),
+          data: pSum.map(v => Number(v)),
           backgroundColor: "rgba(80,160,255,0.65)",
           borderWidth: 0
         },
-        // temp max line (left axis)
         {
           type: "line",
           label: "T max (°C)",
           yAxisID: "yT",
-          data: tMax.map(Number),
+          data: tMax.map(v => Number(v)),
           tension: 0.3,
           pointRadius: 2,
           borderWidth: 2,
           borderColor: "rgba(255,255,255,0.85)",
           backgroundColor: "rgba(255,255,255,0.2)"
         },
-        // temp min line (left axis)
         {
           type: "line",
           label: "T min (°C)",
           yAxisID: "yT",
-          data: tMin.map(Number),
+          data: tMin.map(v => Number(v)),
           tension: 0.3,
           pointRadius: 2,
           borderWidth: 2,
@@ -451,25 +436,25 @@ function drawWeatherDaily(labels, tMax, tMin, pSum){
 }
 
 function drawWeatherWind(labels, wMax){
-  const ctx = document.getElementById("weatherWindChart");
-  if (!ctx) return;
+  const canvas = document.getElementById("weatherWindChart");
+  if (!canvas) return;
 
   if (weatherWindChart) weatherWindChart.destroy();
 
-  weatherWindChart = new Chart(ctx, {
+  weatherWindChart = new Chart(canvas, {
     type: "bar",
     data: {
       labels,
       datasets: [{
         label: "Tuul max (m/s)",
-        data: wMax.map(Number),
+        data: wMax.map(v => Number(v)),
         backgroundColor: "rgba(255,255,255,0.22)",
         borderWidth: 1,
         borderColor: "rgba(255,255,255,0.35)"
       }]
     },
     options: {
-      indexAxis: "y", // <- horizontal bars
+      indexAxis: "y",
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
@@ -479,38 +464,11 @@ function drawWeatherWind(labels, wMax){
           title: { display: true, text: "m/s" },
           grid: { color: "rgba(255,255,255,0.18)" }
         },
-        y: {
-          grid: { color: "rgba(255,255,255,0.10)" }
-        }
+        y: { grid: { color: "rgba(255,255,255,0.10)" } }
       }
     }
   });
 }
-}
-
-// ---- start everything ----
-(async ()=>{
-  try { await loadData(); }
-  catch(e){ document.getElementById("error").textContent = "Viga: " + (e?.message ?? e); }
-})();
-
-// Fetch refresh (data window shifts / old hours drop off)
-setInterval(async ()=>{
-  try { await loadData(); }
-  catch(e){ document.getElementById("error").textContent = "Viga: " + (e?.message ?? e); }
-}, REFRESH_MS);
-
-// Highlight refresh (moves to next hour even if data stays same)
-setInterval(()=>{
-  try { recomputeCurrentIndexAndRestyle(); } catch {}
-}, HIGHLIGHT_MS);
-  // ----- WEATHER (Open-Meteo) -----
-const WEATHER_REFRESH_MS = 30 * 60 * 1000; // 30 minutes
-// Tallinn coords
-const LAT = 59.437;
-const LON = 24.7536;
-
-function wfmt2(n){ return (Number.isFinite(n) ? n.toFixed(1) : "—"); }
 
 async function loadWeather(){
   const errEl = document.getElementById("w_error");
@@ -530,63 +488,43 @@ async function loadWeather(){
   if (!r.ok) throw new Error("Weather HTTP " + r.status);
   const j = await r.json();
 
-  // top cards (current)
   const now = new Date();
-  document.getElementById("w_now").textContent   = wfmt2(j?.current?.temperature_2m);
-  document.getElementById("w_wind").textContent  = wfmt2(j?.current?.wind_speed_10m);
-  document.getElementById("w_precip").textContent = "—"; // we’ll fill from hourly below
-  document.getElementById("w_next").textContent  = "—";
 
-  // hourly helper for "precip 1h" + "next hour temp"
+  document.getElementById("w_now").textContent  = wfmt1(j?.current?.temperature_2m);
+  document.getElementById("w_wind").textContent = wfmt1(j?.current?.wind_speed_10m);
+
   const hTime = j?.hourly?.time || [];
   const hTemp = j?.hourly?.temperature_2m || [];
   const hPrec = j?.hourly?.precipitation || [];
 
+  // best effort: match current hour "YYYY-MM-DDTHH"
   const isoLocalHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours())
-    .toISOString().slice(0,13); // "YYYY-MM-DDTHH"
+    .toISOString().slice(0,13);
   let hIdx = hTime.findIndex(t => String(t).slice(0,13) === isoLocalHour);
   if (hIdx < 0) hIdx = 0;
 
-  document.getElementById("w_precip").textContent = wfmt2(hPrec[hIdx]);
-  document.getElementById("w_next").textContent   = wfmt2(hTemp[hIdx + 1]);
+  document.getElementById("w_precip").textContent = wfmt1(hPrec[hIdx]);
+  document.getElementById("w_next").textContent   = wfmt1(hTemp[hIdx + 1]);
 
   const hh = String(now.getHours()).padStart(2,"0");
   const mm = String(now.getMinutes()).padStart(2,"0");
   const ss = String(now.getSeconds()).padStart(2,"0");
   document.getElementById("w_updated").textContent = `• uuendatud (fetch) ${hh}:${mm}:${ss}`;
 
-  // ----- DAILY SERIES (10 days) -----
   const dTime = j?.daily?.time || [];
   const tMax  = j?.daily?.temperature_2m_max || [];
   const tMin  = j?.daily?.temperature_2m_min || [];
   const pSum  = j?.daily?.precipitation_sum || [];
   const wMax  = j?.daily?.wind_speed_10m_max || [];
 
-  const labels = dTime.map(s => {
-    // "YYYY-MM-DD" -> "DD.MM"
-    const dd = s.slice(8,10);
-    const mo = s.slice(5,7);
-    return `${dd}.${mo}`;
-  });
+  const labels = dTime.map(s => `${s.slice(8,10)}.${s.slice(5,7)}`);
 
   drawWeatherDaily(labels, tMax, tMin, pSum);
   drawWeatherWind(labels, wMax);
 }
-// refresh weather periodically (independent of which screen is showing)
-loadWeather().catch(e=>{
-  const errEl = document.getElementById("w_error");
-  if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
-});
-setInterval(()=>{
-  loadWeather().catch(e=>{
-    const errEl = document.getElementById("w_error");
-    if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
-  });
-}, WEATHER_REFRESH_MS);
 
-
-// ----- SCREEN ROTATION (Electricity <-> Weather) -----
-const ROTATE_MS = 60 * 1000;
+/* ===================== SCREEN ROTATION ===================== */
+const ROTATE_MS = 5 * 60 * 1000; // 5 minutes
 let showing = 0; // 0=electricity, 1=weather
 
 function showScreen(i){
@@ -598,9 +536,40 @@ function showScreen(i){
   elElec.style.display = showElec ? "" : "none";
   elWea.style.display  = showElec ? "none" : "";
 
+  // when returning to electricity view, make sure chart lays out correctly
   if (showElec && chart) chart.resize();
+  if (!showElec && weatherDailyChart) weatherDailyChart.resize();
+  if (!showElec && weatherWindChart) weatherWindChart.resize();
 }
 
+/* ===================== BOOT ===================== */
+(async ()=>{
+  try { await loadData(); }
+  catch(e){ document.getElementById("error").textContent = "Viga: " + (e?.message ?? e); }
+})();
+
+setInterval(async ()=>{
+  try { await loadData(); }
+  catch(e){ document.getElementById("error").textContent = "Viga: " + (e?.message ?? e); }
+}, REFRESH_MS);
+
+setInterval(()=>{
+  try { recomputeCurrentIndexAndRestyle(); } catch {}
+}, HIGHLIGHT_MS);
+
+// weather boot + refresh
+loadWeather().catch(e=>{
+  const errEl = document.getElementById("w_error");
+  if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
+});
+setInterval(()=>{
+  loadWeather().catch(e=>{
+    const errEl = document.getElementById("w_error");
+    if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
+  });
+}, WEATHER_REFRESH_MS);
+
+// rotation
 showScreen(showing);
 setInterval(()=>{
   showing = 1 - showing;
@@ -608,11 +577,5 @@ setInterval(()=>{
 }, ROTATE_MS);
 </script>
 
-
 </body>
 </html>
-
-
-
-
-
