@@ -57,9 +57,18 @@
 </header>
 
 <main>
-  <div id="error" class="err"></div>
-  <div style="height:65vh;">
-    <canvas id="priceChart"></canvas>
+  <div id="w_error" class="err"></div>
+
+  <div class="card" style="height:42vh;">
+    <div class="k">10 päeva: temperatuur + sademed</div>
+    <canvas id="weatherDailyChart"></canvas>
+  </div>
+
+  <div style="height:10px;"></div>
+
+  <div class="card" style="height:28vh;">
+    <div class="k">10 päeva: tuul (m/s)</div>
+    <canvas id="weatherWindChart"></canvas>
   </div>
 </main>
 </div>
@@ -95,6 +104,8 @@ const SRC = "https://cold-shape-2620.mihkel-pranstibel.workers.dev/";
 
 let chart;
 let currentBarIndex = -1;
+let weatherDailyChart;
+let weatherWindChart;
 
 // Store latest chart state so we can update highlight without re-fetching
 let latest = {
@@ -368,7 +379,113 @@ document.getElementById("min").textContent = fmt2(minV);
 document.getElementById("max").textContent = fmt2(maxV);
 
 drawChart(labels, data);
+function drawWeatherDaily(labels, tMax, tMin, pSum){
+  const ctx = document.getElementById("weatherDailyChart");
+  if (!ctx) return;
 
+  if (weatherDailyChart) weatherDailyChart.destroy();
+
+  weatherDailyChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        // precipitation bars (right axis)
+        {
+          type: "bar",
+          label: "Sademed (mm)",
+          yAxisID: "yP",
+          data: pSum.map(Number),
+          backgroundColor: "rgba(80,160,255,0.65)",
+          borderWidth: 0
+        },
+        // temp max line (left axis)
+        {
+          type: "line",
+          label: "T max (°C)",
+          yAxisID: "yT",
+          data: tMax.map(Number),
+          tension: 0.3,
+          pointRadius: 2,
+          borderWidth: 2,
+          borderColor: "rgba(255,255,255,0.85)",
+          backgroundColor: "rgba(255,255,255,0.2)"
+        },
+        // temp min line (left axis)
+        {
+          type: "line",
+          label: "T min (°C)",
+          yAxisID: "yT",
+          data: tMin.map(Number),
+          tension: 0.3,
+          pointRadius: 2,
+          borderWidth: 2,
+          borderColor: "rgba(180,180,180,0.75)",
+          backgroundColor: "rgba(180,180,180,0.2)"
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          grid: { color: "rgba(255,255,255,0.10)" },
+          ticks: { maxRotation: 0, minRotation: 0 }
+        },
+        yT: {
+          position: "left",
+          title: { display: true, text: "°C" },
+          grid: { color: "rgba(255,255,255,0.18)" }
+        },
+        yP: {
+          position: "right",
+          title: { display: true, text: "mm" },
+          grid: { drawOnChartArea: false }
+        }
+      }
+    }
+  });
+}
+
+function drawWeatherWind(labels, wMax){
+  const ctx = document.getElementById("weatherWindChart");
+  if (!ctx) return;
+
+  if (weatherWindChart) weatherWindChart.destroy();
+
+  weatherWindChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Tuul max (m/s)",
+        data: wMax.map(Number),
+        backgroundColor: "rgba(255,255,255,0.22)",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.35)"
+      }]
+    },
+    options: {
+      indexAxis: "y", // <- horizontal bars
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          title: { display: true, text: "m/s" },
+          grid: { color: "rgba(255,255,255,0.18)" }
+        },
+        y: {
+          grid: { color: "rgba(255,255,255,0.10)" }
+        }
+      }
+    }
+  });
+}
 }
 
 // ---- start everything ----
@@ -399,58 +516,62 @@ async function loadWeather(){
   const errEl = document.getElementById("w_error");
   if (errEl) errEl.textContent = "";
 
-  // Open-Meteo: no API key required
   const url =
     "https://api.open-meteo.com/v1/forecast" +
     `?latitude=${LAT}&longitude=${LON}` +
     "&current=temperature_2m,wind_speed_10m" +
     "&hourly=temperature_2m,precipitation" +
+    "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max" +
     "&timezone=Europe%2FTallinn" +
-    "&forecast_days=2" +
+    "&forecast_days=10" +
     "&t=" + Date.now();
 
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) throw new Error("Weather HTTP " + r.status);
   const j = await r.json();
 
-  const nowTemp = j?.current?.temperature_2m;
-  const wind    = j?.current?.wind_speed_10m;
+  // top cards (current)
+  const now = new Date();
+  document.getElementById("w_now").textContent   = wfmt2(j?.current?.temperature_2m);
+  document.getElementById("w_wind").textContent  = wfmt2(j?.current?.wind_speed_10m);
+  document.getElementById("w_precip").textContent = "—"; // we’ll fill from hourly below
+  document.getElementById("w_next").textContent  = "—";
 
+  // hourly helper for "precip 1h" + "next hour temp"
   const hTime = j?.hourly?.time || [];
   const hTemp = j?.hourly?.temperature_2m || [];
   const hPrec = j?.hourly?.precipitation || [];
 
-  // find current hour index by ISO time match (best effort)
-  const now = new Date();
   const isoLocalHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours())
     .toISOString().slice(0,13); // "YYYY-MM-DDTHH"
-  let idx = hTime.findIndex(t => String(t).slice(0,13) === isoLocalHour);
-  if (idx < 0) idx = 0;
+  let hIdx = hTime.findIndex(t => String(t).slice(0,13) === isoLocalHour);
+  if (hIdx < 0) hIdx = 0;
 
-  const precip1h = hPrec[idx];
-  const nextTemp = hTemp[idx + 1];
-
-  document.getElementById("w_now").textContent = wfmt2(nowTemp);
-  document.getElementById("w_wind").textContent = wfmt2(wind);
-  document.getElementById("w_precip").textContent = wfmt2(precip1h);
-  document.getElementById("w_next").textContent = wfmt2(nextTemp);
-
-  // 12h text line
-  const lines = [];
-  for (let i = 0; i < 12; i++){
-    const t = hTime[idx + i];
-    if (!t) break;
-    const hh = String(t).slice(11,16); // "HH:MM"
-    lines.push(`${hh}  ${wfmt2(hTemp[idx+i])}°C   ${wfmt2(hPrec[idx+i])}mm`);
-  }
-  document.getElementById("w_12h").textContent = lines.join("\n");
+  document.getElementById("w_precip").textContent = wfmt2(hPrec[hIdx]);
+  document.getElementById("w_next").textContent   = wfmt2(hTemp[hIdx + 1]);
 
   const hh = String(now.getHours()).padStart(2,"0");
   const mm = String(now.getMinutes()).padStart(2,"0");
   const ss = String(now.getSeconds()).padStart(2,"0");
   document.getElementById("w_updated").textContent = `• uuendatud (fetch) ${hh}:${mm}:${ss}`;
-}
 
+  // ----- DAILY SERIES (10 days) -----
+  const dTime = j?.daily?.time || [];
+  const tMax  = j?.daily?.temperature_2m_max || [];
+  const tMin  = j?.daily?.temperature_2m_min || [];
+  const pSum  = j?.daily?.precipitation_sum || [];
+  const wMax  = j?.daily?.wind_speed_10m_max || [];
+
+  const labels = dTime.map(s => {
+    // "YYYY-MM-DD" -> "DD.MM"
+    const dd = s.slice(8,10);
+    const mo = s.slice(5,7);
+    return `${dd}.${mo}`;
+  });
+
+  drawWeatherDaily(labels, tMax, tMin, pSum);
+  drawWeatherWind(labels, wMax);
+}
 // refresh weather periodically (independent of which screen is showing)
 loadWeather().catch(e=>{
   const errEl = document.getElementById("w_error");
