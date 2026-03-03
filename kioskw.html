@@ -773,9 +773,12 @@ function windToMs(v){
   document.getElementById("w_updated").textContent =
     `• uuendatud (fetch) ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
 const hWindMs = (hWind || []).map(windToMs);
+
+// NEW builder that makes 3h temp line + crossings, but keeps 6h ticks for bars/icons/wind
 const series = buildWeatherSeries3h(hTime, hTemp, hPrec, hWindMs, hCode);
+
+// NEW drawer expects the whole series object
 drawWeatherForecaLike(series);
-drawWeatherForecaLike(blocks.labelsHour, blocks.dayTop, blocks.temps, blocks.precip6h, blocks.winds, blocks.icons);
 }
 
 /* ===================== SCREEN ROTATION ===================== */
