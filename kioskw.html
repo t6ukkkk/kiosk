@@ -39,7 +39,7 @@
   </style>
 </head>
 <body>
-
+<div id="screen-electricity">
 <header>
   <div class="row">
     <span class="pill">Macdronic → tabel</span>
@@ -47,15 +47,6 @@
     <span id="updated" class="muted"></span>
     <span class="pill muted">Auto-refresh: <span id="refresh_s">60</span>s</span>
   </div>
-<div id="screen-foreca" style="display:none; height:100vh;">
-  <iframe
-    id="forecaFrame"
-    src="https://www.foreca.com/Estonia/Tallinn"
-    style="width:100%; height:100%; border:0;"
-    referrerpolicy="no-referrer"
-    loading="lazy"
-  ></iframe>
-</div>
   <div class="grid">
     <div class="card"><div class="k">Hetkel</div><div class="v"><span id="current" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
     <div class="card"><div class="k">Päeva keskmine</div><div class="v"><span id="avg" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
@@ -70,6 +61,15 @@
     <canvas id="priceChart"></canvas>
   </div>
 </main>
+  </div>
+
+<div id="screen-foreca" style="display:none; height:100vh;">
+  <iframe
+    id="forecaFrame"
+    src="https://www.foreca.com/Estonia/Tallinn"
+    style="width:100%; height:100%; border:0;"
+  ></iframe>
+</div>
 
 <script>
 const SRC = "https://cold-shape-2620.mihkel-pranstibel.workers.dev/";
@@ -352,23 +352,31 @@ drawChart(labels, data);
 
 }
 
-const ROTATE_MS = 0.5 * 60 * 1000; // 5 minutes
+const ROTATE_MS = 10 * 1000; // TEST: 10 seconds (change to 5*60*1000 later)
 let showing = 0; // 0 = electricity, 1 = foreca
 
 function showScreen(i){
   const elElec = document.getElementById("screen-electricity");
   const elFor  = document.getElementById("screen-foreca");
-  if (!elElec || !elFor) return;
+  if (!elElec || !elFor) {
+    console.log("Missing screen containers:", { elElec, elFor });
+    return;
+  }
 
   const showElec = (i === 0);
   elElec.style.display = showElec ? "" : "none";
   elFor.style.display  = showElec ? "none" : "";
 
-  // Optional: force chart to reflow when coming back
+  console.log("Showing:", showElec ? "electricity" : "foreca");
+
+  // When returning to chart, force resize
   if (showElec && chart) chart.resize();
 }
 
-// start rotation
+// show initial screen immediately
+showScreen(showing);
+
+// rotate
 setInterval(() => {
   showing = 1 - showing;
   showScreen(showing);
