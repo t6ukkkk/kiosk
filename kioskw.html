@@ -392,93 +392,110 @@ function iconForCodeNight(code){
 
 function pad2(n){ return String(n).padStart(2,"0"); }
 function localHourKey(d){
-  // returns "YYYY-MM-DDTHH" in LOCAL time
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}`;
 }
 
-function build6hBlocks(timesISO, temp, precip, wind, wcode){
-  // Find first 00:00 in the provided hourly timeline (LOCAL)
+function buildWeatherSeries3h(timesISO, temp, precip, wind, wcode){
+  // Find first local midnight present in hourly data
   const dates = timesISO.map(s => new Date(s));
   let firstMidnight = dates.findIndex(d => d.getHours() === 0);
   if (firstMidnight < 0) firstMidnight = 0;
 
-  const out = {
-    labelsHour: [],
-    dayTop: [],
-    temps: [],
-    precip6h: [],
-    winds: [],
-    icons: []
-  };
-
-  const blocksPerDay = [0, 6, 12, 18];
-
-  // jump to a true midnight if possible
+  // Normalize i to a true midnight if possible
   let i = firstMidnight;
   while (i < dates.length && dates[i].getHours() !== 0) i++;
+  const start = (i < dates.length) ? new Date(dates[i]) : new Date(dates[0]);
+  start.setHours(0,0,0,0);
 
-  for (let day = 0; day < 7; day++){
-    if (i >= dates.length) break;
-    const base = new Date(dates[i]); // midnight
-    base.setHours(0,0,0,0);
-
-    for (const h of blocksPerDay){
-      const dt = new Date(base);
-      dt.setHours(h,0,0,0);
-
-      const key = localHourKey(dt); // "YYYY-MM-DDTHH"
-      let idx = -1;
-      for (let k = 0; k < timesISO.length; k++){
-        if (String(timesISO[k]).slice(0,13) === key) { idx = k; break; }
-      }
-      if (idx < 0) continue;
-
-      // hour label
-      out.labelsHour.push(pad2(h));
-      // day label only for 00 block, otherwise empty
-      const weekday = dt.toLocaleDateString("en-GB", { weekday: "short" }); // Tue
-      const m = dt.getMonth() + 1;
-      const dd = dt.getDate();
-      out.dayTop.push(h === 0 ? `${weekday} ${m}/${dd}` : "");
-
-      const tV = Number(temp[idx]);
-      const wV = Number(wind[idx]);
-      const cV = Number(wcode[idx]);
-
-      out.temps.push(Number.isFinite(tV) ? tV : null);
-      out.winds.push(Number.isFinite(wV) ? wV : null);
-      // Midnight (00) uses night icon variants
-if (h === 0) out.icons.push(iconForCodeNight(cV));
-else out.icons.push(iconForCodeDay(cV));
-
-      // precip: sum of previous+future 3 hours => offsets -3,-2,-1,0,1,2 (6 hours)
-      let sum = 0;
-      let any = false;
-      for (const off of [-3,-2,-1,0,1,2]){
-        const j = idx + off;
-        if (j >= 0 && j < precip.length){
-          const p = Number(precip[j]);
-          if (Number.isFinite(p)) { sum += p; any = true; }
-        }
-      }
-      out.precip6h.push(any ? sum : null);
-    }
-
-    // move to next midnight
-    const next = new Date(base);
-    next.setDate(base.getDate() + 1);
-    next.setHours(0,0,0,0);
-
-    const nextKey = localHourKey(next);
-    let nextIdx = -1;
-    for (let k = 0; k < timesISO.length; k++){
-      if (String(timesISO[k]).slice(0,13) === nextKey) { nextIdx = k; break; }
-    }
-    if (nextIdx < 0) break;
-    i = nextIdx;
+  // Build a lookup "YYYY-MM-DDTHH" -> hourly index
+  const idxByHour = new Map();
+  for (let k = 0; k < timesISO.length; k++){
+    idxByHour.set(String(timesISO[k]).slice(0,13), k);
   }
 
-  return out;
+  // We draw 7 days of 3-hour points => 7*24/3 = 56 points
+  const HOURS_TOTAL = 7 * 24;
+  const STEP = 3;
+
+  const tempPoints = [];      // [{x,y}] at 3h
+  const precipBars = [];      // [{x,y}] at 6h (00/06/12/18)
+  const windMarks  = [];      // [{x,y}] at 6h (for overlay text)
+  const iconMarks  = [];      // [{x,icon}] at 6h
+  const dayMarks   = [];      // [{x,text}] at midnight only (x = 0,24,48...)
+
+  for (let h = 0; h <= HOURS_TOTAL; h += STEP){
+    const dt = new Date(start);
+    dt.setHours(dt.getHours() + h);
+
+    const key = localHourKey(dt);
+    const idx = idxByHour.get(key);
+    if (idx == null) continue;
+
+    const tV = Number(temp[idx]);
+    if (Number.isFinite(tV)){
+      tempPoints.push({ x: h, y: tV });
+    }
+  }
+
+  // Add exact 0°C crossing points (fractional x) so red/blue is perfect
+  const withCrossings = [];
+  for (let p = 0; p < tempPoints.length; p++){
+    const a = tempPoints[p];
+    withCrossings.push(a);
+
+    const b = tempPoints[p + 1];
+    if (!b) continue;
+
+    // If it crosses 0 between a and b, insert a point at y=0
+    if ((a.y > 0 && b.y < 0) || (a.y < 0 && b.y > 0)){
+      const t = a.y / (a.y - b.y); // fraction between a and b
+      const x0 = a.x + (b.x - a.x) * t;
+      withCrossings.push({ x: x0, y: 0 });
+    }
+  }
+
+  // Build 6-hour marks for bars/icons/wind and day labels
+  for (let h = 0; h <= HOURS_TOTAL; h += 6){
+    const dt = new Date(start);
+    dt.setHours(dt.getHours() + h);
+    const key = localHourKey(dt);
+    const idx = idxByHour.get(key);
+    if (idx == null) continue;
+
+    const hour = dt.getHours();
+
+    // Day label at midnight
+    if (hour === 0){
+      const weekday = dt.toLocaleDateString("en-GB", { weekday: "short" });
+      const m = dt.getMonth() + 1;
+      const dd = dt.getDate();
+      dayMarks.push({ x: h, text: `${weekday} ${m}/${dd}` });
+    }
+
+    // icon at 6h ticks (midnight uses night icon)
+    const cV = Number(wcode[idx]);
+    const icon = (hour === 0) ? iconForCodeNight(cV) : iconForCodeDay(cV);
+    iconMarks.push({ x: h, icon });
+
+    // wind at 6h ticks (already converted to m/s before calling this builder)
+    const wV = Number(wind[idx]);
+    windMarks.push({ x: h, y: Number.isFinite(wV) ? wV : null });
+
+    // precip bar at 6h ticks:
+    // sum previous+future 3 hours = 6 hours total => offsets -3,-2,-1,0,1,2 (hourly indices)
+    let sum = 0;
+    let any = false;
+    for (const off of [-3,-2,-1,0,1,2]){
+      const j = idx + off;
+      if (j >= 0 && j < precip.length){
+        const pV = Number(precip[j]);
+        if (Number.isFinite(pV)){ sum += pV; any = true; }
+      }
+    }
+    precipBars.push({ x: h, y: any ? sum : null });
+  }
+
+  return { start, tempLine: withCrossings, precipBars, windMarks, iconMarks, dayMarks };
 }
 const forecaStyleOverlay = {
   id: "forecaStyleOverlay",
@@ -486,49 +503,45 @@ const forecaStyleOverlay = {
     const { ctx, chartArea } = chart;
     if (!chartArea) return;
 
-    const icons = opts?.icons || [];
-    const winds = opts?.winds || [];
-    const dayTop = opts?.dayTop || [];
-
     const xScale = chart.scales?.x;
     if (!xScale) return;
+
+    const iconMarks = opts?.iconMarks || [];
+    const windMarks = opts?.windMarks || [];
+    const dayMarks  = opts?.dayMarks || [];
 
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    // Day labels (top-most)
+    // Day labels (top)
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#111";
-    for (let i = 0; i < chart.data.labels.length; i++){
-      const txt = dayTop[i];
-      if (!txt) continue;
-      const x = xScale.getPixelForTick(i);
-      ctx.fillText(txt, x, chartArea.top - 58);
+    for (const m of dayMarks){
+      const x = xScale.getPixelForValue(m.x);
+      ctx.fillText(m.text, x, chartArea.top - 62);
     }
 
-    // Icons row (below hour ticks)
+    // Icons (below hour ticks)
     ctx.font = "16px -apple-system, system-ui, Segoe UI, Roboto, Arial";
-    ctx.fillStyle = "#111";
-    for (let i = 0; i < chart.data.labels.length; i++){
-      const x = xScale.getPixelForTick(i);
-     ctx.fillText(icons[i] ?? "•", x, chartArea.top - 10);
+    for (const m of iconMarks){
+      const x = xScale.getPixelForValue(m.x);
+      ctx.fillText(m.icon ?? "•", x, chartArea.top - 14);
     }
 
-    // Wind row (bottom) - BLACK text
+    // Wind row (bottom) — black
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#111";
-    for (let i = 0; i < chart.data.labels.length; i++){
-      const x = xScale.getPixelForTick(i);
-      const w = winds[i];
-      const txt = Number.isFinite(w) ? String(Math.round(w)) : "—";
-      ctx.fillText(txt, x, chartArea.bottom + 30);
+    for (const m of windMarks){
+      const x = xScale.getPixelForValue(m.x);
+      const txt = Number.isFinite(m.y) ? String(Math.round(m.y)) : "—";
+      ctx.fillText(txt, x, chartArea.bottom + 32);
     }
+
+    ctx.textAlign = "left";
+    ctx.fillText("m/s", chartArea.left, chartArea.bottom + 32);
 
     // units
-    ctx.textAlign = "left";
-    ctx.fillText("m/s", chartArea.left, chartArea.bottom + 30);
-
     ctx.fillStyle = "#2a70ff";
     ctx.textAlign = "right";
     ctx.fillText("mm", chartArea.right, chartArea.bottom + 12);
@@ -613,61 +626,54 @@ const forecaStyleOverlay = {
 
   return { base, red, blue };
 }
-function drawWeatherForecaLike(labelsHour, dayTop, temps, precip6h, winds, icons){
+function nextStep2(x){
+  if (!Number.isFinite(x)) return 10;
+  return Math.ceil(x / 2) * 2;
+}
+
+function drawWeatherForecaLike(series){
   const canvas = document.getElementById("weatherForecaChart");
   if (!canvas) return;
 
+  const { tempLine, precipBars, iconMarks, windMarks, dayMarks } = series;
+
+  const maxP = Math.max(0, ...precipBars.map(p => p.y).filter(v => Number.isFinite(v)));
+  const pMax = maxP > 10 ? nextStep2(maxP) : 10;
+
   if (weatherForecaChart) weatherForecaChart.destroy();
-  const maxP = Math.max(0, ...precip6h.filter(v => Number.isFinite(v)));
-const pMax = maxP > 10 ? nextStep2(maxP) : 10;
-  const T = buildTempOverlays(temps);
 
   weatherForecaChart = new Chart(canvas, {
     data: {
-      labels: labelsHour,
       datasets: [
+        // precip bars at 6h ticks
         {
           type: "bar",
           yAxisID: "yP",
-          data: precip6h,
+          data: precipBars.filter(p => Number.isFinite(p.y)),
+          parsing: false,
           backgroundColor: "rgba(60,130,255,0.55)",
           borderWidth: 0,
-          barPercentage: 0.9,
-          categoryPercentage: 0.95
+          barThickness: 22
         },
-// Base thin line (always continuous)
-{
-  type: "line",
-  yAxisID: "yT",
-  data: T.base,
-  tension: 0.35,
-  pointRadius: 0,
-  borderWidth: 2,
-  borderColor: "rgba(0,0,0,0.35)",
-  spanGaps: true
-},
-// Red overlay (>=0)
-{
-  type: "line",
-  yAxisID: "yT",
-  data: T.red,
-  tension: 0.35,
-  pointRadius: 0,
-  borderWidth: 2,
-  borderColor: "#d92626",
-  spanGaps: true
-},
-// Blue overlay (<0)
-{
-  type: "line",
-  yAxisID: "yT",
-  data: T.blue,
-  tension: 0.35,
-  pointRadius: 0,
-  borderWidth: 2,
-  borderColor: "#1f77ff",
-  spanGaps: true
-}
+        // temperature line (single line, colored by segment)
+        {
+          type: "line",
+          yAxisID: "yT",
+          data: tempLine,
+          parsing: false,
+          tension: 0.35,
+          pointRadius: 0,
+          borderWidth: 2,
+          spanGaps: true,
+          segment: {
+            borderColor: (ctx) => {
+              const y0 = ctx.p0.parsed.y;
+              const y1 = ctx.p1.parsed.y;
+              const mid = (y0 + y1) / 2;
+              return (mid < 0) ? "#1f77ff" : "#d92626";
+            }
+          }
+        }
       ]
     },
     options: {
@@ -676,48 +682,44 @@ const pMax = maxP > 10 ? nextStep2(maxP) : 10;
       animation: false,
       plugins: {
         legend: { display: false },
-        forecaStyleOverlay: { icons, winds, dayTop }
+        forecaStyleOverlay: { iconMarks, windMarks, dayMarks }
       },
-     layout: { padding: { top: 78, bottom: 54, left: 10, right: 10 } },
+      layout: {
+        padding: { top: 92, bottom: 58, left: 10, right: 10 }
+      },
       scales: {
         x: {
-          position: "top",           // <-- hours at top
+          type: "linear",
+          position: "top",
+          min: 0,
+          max: 7 * 24,
           ticks: {
             color: "#111",
-            autoSkip: false,
-            maxRotation: 0,
-            minRotation: 0,
-            font: { size: 11 },
-            padding: 26             // create space between ticks and icons
+            stepSize: 6,               // tick positions every 6 hours
+            padding: 26,
+            callback: (v) => {
+              // show 00/06/12/18 only; v is hours from start
+              const hh = ((v % 24) + 24) % 24;
+              return pad2(hh);
+            }
           },
           grid: {
-  lineWidth: (ctx) => {
-    const label = ctx.chart.data.labels[ctx.index];
-    return label === "00" ? 2 : 1;
-  },
-  color: (ctx) => {
-    const label = ctx.chart.data.labels[ctx.index];
-    return label === "00"
-      ? "rgba(0,0,0,0.35)"   // darker midnight divider
-      : "rgba(0,0,0,0.08)";  // normal grid
-  }
-}
+            lineWidth: (ctx) => (ctx.tick.value % 24 === 0 ? 2 : 1),
+            color: (ctx) => (ctx.tick.value % 24 === 0 ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.08)")
+          }
         },
         yT: {
           position: "left",
           ticks: { color: "#111" },
           grid: { color: "rgba(0,0,0,0.10)" }
         },
-yP: {
-  position: "right",
-  min: 0,
-  suggestedMax: pMax,
-  ticks: {
-    color: "#2a70ff",
-    stepSize: 2
-  },
-  grid: { drawOnChartArea: false }
-}
+        yP: {
+          position: "right",
+          min: 0,
+          suggestedMax: pMax,
+          ticks: { color: "#2a70ff", stepSize: 2 },
+          grid: { drawOnChartArea: false }
+        }
       }
     },
     plugins: [forecaStyleOverlay, zeroCLinePlugin]
@@ -771,7 +773,8 @@ function windToMs(v){
   document.getElementById("w_updated").textContent =
     `• uuendatud (fetch) ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
 const hWindMs = (hWind || []).map(windToMs);
-  const blocks = build6hBlocks(hTime, hTemp, hPrec, hWindMs, hCode);
+const series = buildWeatherSeries3h(hTime, hTemp, hPrec, hWindMs, hCode);
+drawWeatherForecaLike(series);
 drawWeatherForecaLike(blocks.labelsHour, blocks.dayTop, blocks.temps, blocks.precip6h, blocks.winds, blocks.icons);
 }
 
