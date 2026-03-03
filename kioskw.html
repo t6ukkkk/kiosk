@@ -369,72 +369,56 @@ function iconForCode(code){
   return "•";
 }
 
-function build6hBlocks(timesISO, temp, precip, wind, wcode){
-  // Build blocks at 00/06/12/18 local, across 7 days.
-  // Value at the exact block time for temp/wind/wcode.
-  // Precip: sum of previous+future 3 hours => offsets -3,-2,-1,0,1,2 (6 hours total).
-  const timeIndex = new Map();
-  for (let i = 0; i < timesISO.length; i++) timeIndex.set(String(timesISO[i]), i);
+function pad2(n){ return String(n).padStart(2,"0"); }
+function localHourKey(d){
+  // returns "YYYY-MM-DDTHH" in LOCAL time
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}`;
+}
 
-  // Find first local midnight in the hourly list
+function build6hBlocks(timesISO, temp, precip, wind, wcode){
+  // Find first 00:00 in the provided hourly timeline (LOCAL)
   const dates = timesISO.map(s => new Date(s));
-  let firstMidnight = -1;
-  for (let i = 0; i < dates.length; i++){
-    const d = dates[i];
-    if (d.getHours() === 0) { firstMidnight = i; break; }
-  }
+  let firstMidnight = dates.findIndex(d => d.getHours() === 0);
   if (firstMidnight < 0) firstMidnight = 0;
 
   const out = {
-    labels: [],
+    labelsHour: [],
+    dayTop: [],
     temps: [],
     precip6h: [],
     winds: [],
-    icons: [],
-    times: []
+    icons: []
   };
 
-  // iterate 7 days * 4 blocks
   const blocksPerDay = [0, 6, 12, 18];
-  let dayCount = 0;
-  let i = firstMidnight;
 
-  // ensure we start exactly at a 00:00 hour
-  // if firstMidnight isn't day boundary, normalize by moving to next 00:00
+  // jump to a true midnight if possible
+  let i = firstMidnight;
   while (i < dates.length && dates[i].getHours() !== 0) i++;
 
-  while (i < dates.length && dayCount < 7){
-    const base = dates[i]; // midnight for the day
-    // If we somehow jumped past midnight, break
-    if (base.getHours() !== 0) break;
+  for (let day = 0; day < 7; day++){
+    if (i >= dates.length) break;
+    const base = new Date(dates[i]); // midnight
+    base.setHours(0,0,0,0);
 
     for (const h of blocksPerDay){
       const dt = new Date(base);
-      dt.setHours(h, 0, 0, 0);
+      dt.setHours(h,0,0,0);
 
-      // find matching hour in array by ISO string exact
-      const iso = dt.toISOString().slice(0,13); // "YYYY-MM-DDTHH"
-      // find first time entry that matches this hour
+      const key = localHourKey(dt); // "YYYY-MM-DDTHH"
       let idx = -1;
       for (let k = 0; k < timesISO.length; k++){
-        const s = String(timesISO[k]);
-        if (s.slice(0,13) === iso) { idx = k; break; }
+        if (String(timesISO[k]).slice(0,13) === key) { idx = k; break; }
       }
       if (idx < 0) continue;
 
-      const d = new Date(timesISO[idx]);
-      const hourStr = String(d.getHours()).padStart(2,"0");
-
-      // label: show day on first block (00) only, like Foreca row above
-      let dayLine = "";
-      if (h === 0){
-        const weekday = d.toLocaleDateString("en-GB", { weekday: "short" }); // Tue
-        const m = d.getMonth() + 1;
-        const dd = d.getDate();
-        dayLine = `${weekday} ${m}/${dd}`;
-      }
-      out.labels.push([dayLine, hourStr]); // 2-line ticks
-      out.times.push(timesISO[idx]);
+      // hour label
+      out.labelsHour.push(pad2(h));
+      // day label only for 00 block, otherwise empty
+      const weekday = dt.toLocaleDateString("en-GB", { weekday: "short" }); // Tue
+      const m = dt.getMonth() + 1;
+      const dd = dt.getDate();
+      out.dayTop.push(h === 0 ? `${weekday} ${m}/${dd}` : "");
 
       const tV = Number(temp[idx]);
       const wV = Number(wind[idx]);
@@ -444,31 +428,28 @@ function build6hBlocks(timesISO, temp, precip, wind, wcode){
       out.winds.push(Number.isFinite(wV) ? wV : null);
       out.icons.push(iconForCode(cV));
 
-      // 6h precip centered: offsets -3,-2,-1,0,1,2
+      // precip: sum of previous+future 3 hours => offsets -3,-2,-1,0,1,2 (6 hours)
       let sum = 0;
       let any = false;
       for (const off of [-3,-2,-1,0,1,2]){
         const j = idx + off;
-        const p = Number(precip[j]);
-        if (j >= 0 && j < precip.length && Number.isFinite(p)){
-          sum += p;
-          any = true;
+        if (j >= 0 && j < precip.length){
+          const p = Number(precip[j]);
+          if (Number.isFinite(p)) { sum += p; any = true; }
         }
       }
       out.precip6h.push(any ? sum : null);
     }
 
-    // move i to next day midnight
-    dayCount++;
-    const nextDay = new Date(base);
-    nextDay.setDate(base.getDate() + 1);
-    nextDay.setHours(0,0,0,0);
-    const nextIso = nextDay.toISOString().slice(0,13);
+    // move to next midnight
+    const next = new Date(base);
+    next.setDate(base.getDate() + 1);
+    next.setHours(0,0,0,0);
 
+    const nextKey = localHourKey(next);
     let nextIdx = -1;
     for (let k = 0; k < timesISO.length; k++){
-      const s = String(timesISO[k]);
-      if (s.slice(0,13) === nextIso) { nextIdx = k; break; }
+      if (String(timesISO[k]).slice(0,13) === nextKey) { nextIdx = k; break; }
     }
     if (nextIdx < 0) break;
     i = nextIdx;
@@ -485,44 +466,49 @@ const forecaStyleOverlay = {
 
     const icons = opts?.icons || [];
     const winds = opts?.winds || [];
+    const dayTop = opts?.dayTop || [];
+
     const xScale = chart.scales?.x;
     if (!xScale) return;
 
     ctx.save();
-
-    // Icons row (top)
-    ctx.font = "16px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
 
+    // Day labels (top-most)
+    ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
+    ctx.fillStyle = "#111";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < chart.data.labels.length; i++){
+      const txt = dayTop[i];
+      if (!txt) continue;
+      const x = xScale.getPixelForTick(i);
+      ctx.fillText(txt, x, chartArea.top - 26);
+    }
+
+    // Icons row (below day label)
+    ctx.font = "16px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     for (let i = 0; i < chart.data.labels.length; i++){
       const x = xScale.getPixelForTick(i);
-      const icon = icons[i] ?? "•";
-      ctx.fillText(icon, x, chartArea.top - 10);
+      ctx.fillText(icons[i] ?? "•", x, chartArea.top - 10);
     }
 
     // Wind row (bottom)
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
-    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#2a9d55";
     for (let i = 0; i < chart.data.labels.length; i++){
       const x = xScale.getPixelForTick(i);
       const w = winds[i];
       const txt = Number.isFinite(w) ? String(Math.round(w)) : "—";
-      ctx.fillStyle = "#2a9d55"; // green-ish like foreca wind
       ctx.fillText(txt, x, chartArea.bottom + 26);
     }
-
-    // units on left bottom: "m/s"
-    ctx.fillStyle = "#2a9d55";
     ctx.textAlign = "left";
     ctx.fillText("m/s", chartArea.left, chartArea.bottom + 26);
 
-    // units on right bottom: "mm"
+    // units
     ctx.fillStyle = "#2a70ff";
     ctx.textAlign = "right";
     ctx.fillText("mm", chartArea.right, chartArea.bottom + 10);
 
-    // units on left: "°C"
     ctx.fillStyle = "#111";
     ctx.textAlign = "left";
     ctx.fillText("°C", chartArea.left, chartArea.bottom + 10);
@@ -530,8 +516,7 @@ const forecaStyleOverlay = {
     ctx.restore();
   }
 };
-
-function drawWeatherForecaLike(labels, temps, precip6h, winds, icons){
+function drawWeatherForecaLike(labelsHour, dayTop, temps, precip6h, winds, icons){
   const canvas = document.getElementById("weatherForecaChart");
   if (!canvas) return;
 
@@ -539,12 +524,10 @@ function drawWeatherForecaLike(labels, temps, precip6h, winds, icons){
 
   weatherForecaChart = new Chart(canvas, {
     data: {
-      labels,
+      labels: labelsHour,
       datasets: [
-        // Precip bars (right axis)
         {
           type: "bar",
-          label: "Sademed (6h, mm)",
           yAxisID: "yP",
           data: precip6h,
           backgroundColor: "rgba(60,130,255,0.55)",
@@ -552,21 +535,17 @@ function drawWeatherForecaLike(labels, temps, precip6h, winds, icons){
           barPercentage: 0.9,
           categoryPercentage: 0.95
         },
-        // Temp line (left axis) with segment coloring
         {
           type: "line",
-          label: "Temp (°C)",
           yAxisID: "yT",
           data: temps,
           tension: 0.35,
           pointRadius: 0,
           borderWidth: 2,
-          // segment color: red above 0, blue below 0 (like Foreca)
           segment: {
             borderColor: (ctx) => {
               const y0 = ctx.p0.parsed.y;
               const y1 = ctx.p1.parsed.y;
-              // if both below 0 -> blue, else red (simple rule)
               return (y0 < 0 && y1 < 0) ? "#1f77ff" : "#d92626";
             }
           }
@@ -579,25 +558,22 @@ function drawWeatherForecaLike(labels, temps, precip6h, winds, icons){
       animation: false,
       plugins: {
         legend: { display: false },
-        forecaStyleOverlay: { icons, winds }
+        forecaStyleOverlay: { icons, winds, dayTop }
       },
       layout: {
-        // extra room for icons (top) + wind row (bottom)
-        padding: { top: 26, bottom: 38, left: 6, right: 6 }
+        // extra room for day label + icons + wind row
+        padding: { top: 42, bottom: 38, left: 6, right: 6 }
       },
       scales: {
         x: {
           ticks: {
             color: "#111",
+            autoSkip: false,
             maxRotation: 0,
             minRotation: 0,
-            autoSkip: false,
             font: { size: 11 }
           },
-          grid: {
-            color: "rgba(0,0,0,0.08)",
-            lineWidth: 1
-          }
+          grid: { color: "rgba(0,0,0,0.08)", lineWidth: 1 }
         },
         yT: {
           position: "left",
@@ -656,7 +632,7 @@ async function loadWeather(){
     `• uuendatud (fetch) ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
 
   const blocks = build6hBlocks(hTime, hTemp, hPrec, hWind, hCode);
-  drawWeatherForecaLike(blocks.labels, blocks.temps, blocks.precip6h, blocks.winds, blocks.icons);
+drawWeatherForecaLike(blocks.labelsHour, blocks.dayTop, blocks.temps, blocks.precip6h, blocks.winds, blocks.icons);
 }
 
 /* ===================== SCREEN ROTATION ===================== */
