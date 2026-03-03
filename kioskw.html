@@ -47,6 +47,7 @@
     <span id="updated" class="muted"></span>
     <span class="pill muted">Auto-refresh: <span id="refresh_s">60</span>s</span>
   </div>
+
   <div class="grid">
     <div class="card"><div class="k">Hetkel</div><div class="v"><span id="current" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
     <div class="card"><div class="k">Päeva keskmine</div><div class="v"><span id="avg" class="mono">—</span> <span class="tag">senti/kWh</span></div></div>
@@ -61,14 +62,32 @@
     <canvas id="priceChart"></canvas>
   </div>
 </main>
-  </div>
+</div>
+  <div id="screen-weather" style="display:none;">
+  <header>
+    <div class="row">
+      <span class="pill">Ilm → Tallinn</span>
+      <span class="big">Ilm</span>
+      <span id="w_updated" class="muted"></span>
+      <span class="pill muted">Auto-refresh: 30m</span>
+    </div>
 
-<div id="screen-foreca" style="display:none; height:100vh;">
-  <iframe
-    id="forecaFrame"
-    src="https://www.foreca.com/Estonia/Tallinn"
-    style="width:100%; height:100%; border:0;"
-  ></iframe>
+    <div class="grid">
+      <div class="card"><div class="k">Hetkel</div><div class="v"><span id="w_now" class="mono">—</span> <span class="tag">°C</span></div></div>
+      <div class="card"><div class="k">Tuul</div><div class="v"><span id="w_wind" class="mono">—</span> <span class="tag">m/s</span></div></div>
+      <div class="card"><div class="k">Sademed (1h)</div><div class="v"><span id="w_precip" class="mono">—</span> <span class="tag">mm</span></div></div>
+      <div class="card"><div class="k">Järgmine tund</div><div class="v"><span id="w_next" class="mono">—</span> <span class="tag">°C</span></div></div>
+    </div>
+  </header>
+
+  <main>
+    
+    <div id="w_error" class="err"></div>
+    <div class="card">
+      <div class="k">Järgmised 12h (°C / mm)</div>
+      <div id="w_12h" class="mono" style="white-space:pre-wrap; line-height:1.4;"></div>
+    </div>
+  </main>
 </div>
 
 <script>
@@ -352,35 +371,6 @@ drawChart(labels, data);
 
 }
 
-const ROTATE_MS = 10 * 1000; // TEST: 10 seconds (change to 5*60*1000 later)
-let showing = 0; // 0 = electricity, 1 = foreca
-
-function showScreen(i){
-  const elElec = document.getElementById("screen-electricity");
-  const elFor  = document.getElementById("screen-foreca");
-  if (!elElec || !elFor) {
-    console.log("Missing screen containers:", { elElec, elFor });
-    return;
-  }
-
-  const showElec = (i === 0);
-  elElec.style.display = showElec ? "" : "none";
-  elFor.style.display  = showElec ? "none" : "";
-
-  console.log("Showing:", showElec ? "electricity" : "foreca");
-
-  // When returning to chart, force resize
-  if (showElec && chart) chart.resize();
-}
-
-// show initial screen immediately
-showScreen(showing);
-
-// rotate
-setInterval(() => {
-  showing = 1 - showing;
-  showScreen(showing);
-}, ROTATE_MS);
 // ---- start everything ----
 (async ()=>{
   try { await loadData(); }
@@ -397,12 +387,109 @@ setInterval(async ()=>{
 setInterval(()=>{
   try { recomputeCurrentIndexAndRestyle(); } catch {}
 }, HIGHLIGHT_MS);
+  // ----- WEATHER (Open-Meteo) -----
+const WEATHER_REFRESH_MS = 30 * 60 * 1000; // 30 minutes
+// Tallinn coords
+const LAT = 59.437;
+const LON = 24.7536;
+
+function wfmt2(n){ return (Number.isFinite(n) ? n.toFixed(1) : "—"); }
+
+async function loadWeather(){
+  const errEl = document.getElementById("w_error");
+  if (errEl) errEl.textContent = "";
+
+  // Open-Meteo: no API key required
+  const url =
+    "https://api.open-meteo.com/v1/forecast" +
+    `?latitude=${LAT}&longitude=${LON}` +
+    "&current=temperature_2m,wind_speed_10m" +
+    "&hourly=temperature_2m,precipitation" +
+    "&timezone=Europe%2FTallinn" +
+    "&forecast_days=2" +
+    "&t=" + Date.now();
+
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("Weather HTTP " + r.status);
+  const j = await r.json();
+
+  const nowTemp = j?.current?.temperature_2m;
+  const wind    = j?.current?.wind_speed_10m;
+
+  const hTime = j?.hourly?.time || [];
+  const hTemp = j?.hourly?.temperature_2m || [];
+  const hPrec = j?.hourly?.precipitation || [];
+
+  // find current hour index by ISO time match (best effort)
+  const now = new Date();
+  const isoLocalHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours())
+    .toISOString().slice(0,13); // "YYYY-MM-DDTHH"
+  let idx = hTime.findIndex(t => String(t).slice(0,13) === isoLocalHour);
+  if (idx < 0) idx = 0;
+
+  const precip1h = hPrec[idx];
+  const nextTemp = hTemp[idx + 1];
+
+  document.getElementById("w_now").textContent = wfmt2(nowTemp);
+  document.getElementById("w_wind").textContent = wfmt2(wind);
+  document.getElementById("w_precip").textContent = wfmt2(precip1h);
+  document.getElementById("w_next").textContent = wfmt2(nextTemp);
+
+  // 12h text line
+  const lines = [];
+  for (let i = 0; i < 12; i++){
+    const t = hTime[idx + i];
+    if (!t) break;
+    const hh = String(t).slice(11,16); // "HH:MM"
+    lines.push(`${hh}  ${wfmt2(hTemp[idx+i])}°C   ${wfmt2(hPrec[idx+i])}mm`);
+  }
+  document.getElementById("w_12h").textContent = lines.join("\n");
+
+  const hh = String(now.getHours()).padStart(2,"0");
+  const mm = String(now.getMinutes()).padStart(2,"0");
+  const ss = String(now.getSeconds()).padStart(2,"0");
+  document.getElementById("w_updated").textContent = `• uuendatud (fetch) ${hh}:${mm}:${ss}`;
+}
+
+// refresh weather periodically (independent of which screen is showing)
+loadWeather().catch(e=>{
+  const errEl = document.getElementById("w_error");
+  if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
+});
+setInterval(()=>{
+  loadWeather().catch(e=>{
+    const errEl = document.getElementById("w_error");
+    if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
+  });
+}, WEATHER_REFRESH_MS);
+
+
+// ----- SCREEN ROTATION (Electricity <-> Weather) -----
+const ROTATE_MS = 60 * 1000;
+let showing = 0; // 0=electricity, 1=weather
+
+function showScreen(i){
+  const elElec = document.getElementById("screen-electricity");
+  const elWea  = document.getElementById("screen-weather");
+  if (!elElec || !elWea) return;
+
+  const showElec = (i === 0);
+  elElec.style.display = showElec ? "" : "none";
+  elWea.style.display  = showElec ? "none" : "";
+
+  if (showElec && chart) chart.resize();
+}
+
+showScreen(showing);
+setInterval(()=>{
+  showing = 1 - showing;
+  showScreen(showing);
+}, ROTATE_MS);
 </script>
 
 
 </body>
 </html>
-
 
 
 
