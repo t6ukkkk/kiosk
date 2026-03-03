@@ -37,35 +37,36 @@
       .grid{grid-template-columns:repeat(2,minmax(140px,1fr));}
     }
 
-    /* ===================== WEATHER WHITE THEME OVERRIDES ===================== */
-    #screen-weather{
-      background:#f5f5f6;
-      color:#111;
-      min-height:100vh;
-    }
-    #screen-weather header{
-      background:#ffffff;
-      border-bottom:1px solid #ddd;
-    }
-    #screen-weather .pill{
-      background:#f0f2f4;
-      border:1px solid #d5d9de;
-      color:#111;
-    }
-    #screen-weather .muted{ opacity:.7; color:#111; }
-    #screen-weather .card{
-      background:#ffffff;
-      border:1px solid #e0e0e0;
-      color:#111;
-    }
-    #screen-weather .err{ color:#b00020; }
-    /* Make chart container a bit “Foreca-like” */
-    #screen-weather .chartWrap{
-      background:#fff;
-      border:1px solid #e0e0e0;
-      border-radius:14px;
-      padding:10px;
-    }
+/* ===================== WEATHER: KEEP DARK PAGE, LIGHTER CHART ONLY ===================== */
+#screen-weather{
+  background:#0b0b0c;
+  color:#eaeaea;
+  min-height:100vh;
+}
+#screen-weather header{
+  background:#0b0b0c;
+  border-bottom:1px solid #222;
+}
+#screen-weather .pill{
+  background:#16181a;
+  border:1px solid #2a2d31;
+  color:#eaeaea;
+}
+#screen-weather .muted{ opacity:.75; color:#eaeaea; }
+#screen-weather .card{
+  background:#121416;
+  border:1px solid #24282d;
+  color:#eaeaea;
+}
+#screen-weather .err{ color:#ff6b6b; }
+
+/* chart container itself slightly grey */
+#screen-weather .chartWrap{
+  background:#dcdde1;           /* slightly grey like you asked */
+  border:1px solid #b8bac2;
+  border-radius:14px;
+  padding:10px;
+}
   </style>
 </head>
 
@@ -457,7 +458,6 @@ function build6hBlocks(timesISO, temp, precip, wind, wcode){
 
   return out;
 }
-
 const forecaStyleOverlay = {
   id: "forecaStyleOverlay",
   afterDraw(chart, args, opts){
@@ -473,23 +473,23 @@ const forecaStyleOverlay = {
 
     ctx.save();
     ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
 
     // Day labels (top-most)
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#111";
-    ctx.textBaseline = "middle";
     for (let i = 0; i < chart.data.labels.length; i++){
       const txt = dayTop[i];
       if (!txt) continue;
       const x = xScale.getPixelForTick(i);
-      ctx.fillText(txt, x, chartArea.top - 26);
+      ctx.fillText(txt, x, chartArea.top - 46);
     }
 
-    // Icons row (below day label)
+    // Icons row (below the hour ticks line)
     ctx.font = "16px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     for (let i = 0; i < chart.data.labels.length; i++){
       const x = xScale.getPixelForTick(i);
-      ctx.fillText(icons[i] ?? "•", x, chartArea.top - 10);
+      ctx.fillText(icons[i] ?? "•", x, chartArea.top - 18);
     }
 
     // Wind row (bottom)
@@ -513,6 +513,28 @@ const forecaStyleOverlay = {
     ctx.textAlign = "left";
     ctx.fillText("°C", chartArea.left, chartArea.bottom + 10);
 
+    ctx.restore();
+  }
+};
+  const zeroCLinePlugin = {
+  id: "zeroCLine",
+  afterDraw(chart){
+    const yT = chart.scales?.yT;
+    const area = chart.chartArea;
+    if (!yT || !area) return;
+
+    const y0 = yT.getPixelForValue(0);
+    if (!Number.isFinite(y0)) return;
+    if (y0 < area.top || y0 > area.bottom) return;
+
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = "rgba(0,0,0,0.45)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(area.left, y0);
+    ctx.lineTo(area.right, y0);
+    ctx.stroke();
     ctx.restore();
   }
 };
@@ -561,17 +583,19 @@ function drawWeatherForecaLike(labelsHour, dayTop, temps, precip6h, winds, icons
         forecaStyleOverlay: { icons, winds, dayTop }
       },
       layout: {
-        // extra room for day label + icons + wind row
-        padding: { top: 42, bottom: 38, left: 6, right: 6 }
+        // room for: day label + hour ticks + icons (top), and wind row (bottom)
+        padding: { top: 64, bottom: 38, left: 8, right: 8 }
       },
       scales: {
         x: {
+          position: "top",           // <-- hours at top
           ticks: {
             color: "#111",
             autoSkip: false,
             maxRotation: 0,
             minRotation: 0,
-            font: { size: 11 }
+            font: { size: 11 },
+            padding: 10             // create space between ticks and icons
           },
           grid: { color: "rgba(0,0,0,0.08)", lineWidth: 1 }
         },
@@ -582,12 +606,15 @@ function drawWeatherForecaLike(labelsHour, dayTop, temps, precip6h, winds, icons
         },
         yP: {
           position: "right",
-          ticks: { color: "#2a70ff" },
+          ticks: {
+            color: "#2a70ff",
+            stepSize: 2              // <-- fixed 2mm intervals
+          },
           grid: { drawOnChartArea: false }
         }
       }
     },
-    plugins: [forecaStyleOverlay]
+    plugins: [forecaStyleOverlay, zeroCLinePlugin]
   });
 }
 
@@ -597,22 +624,29 @@ async function loadWeather(){
 
   // Open-Meteo hourly; 7 days; local timezone
   const url =
-    "https://api.open-meteo.com/v1/forecast" +
-    `?latitude=${LAT}&longitude=${LON}` +
-    "&current=temperature_2m,wind_speed_10m" +
-    "&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code" +
-    "&timezone=Europe%2FTallinn" +
-    "&forecast_days=7" +
-    "&t=" + Date.now();
-
+  "https://api.open-meteo.com/v1/forecast" +
+  `?latitude=${LAT}&longitude=${LON}` +
+  "&current=temperature_2m,wind_speed_10m" +
+  "&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code" +
+  "&wind_speed_unit=ms" +
+  "&timezone=Europe%2FTallinn" +
+  "&forecast_days=7" +
+  "&t=" + Date.now();
+  
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) throw new Error("Weather HTTP " + r.status);
   const j = await r.json();
 
   const now = new Date();
   document.getElementById("w_now").textContent  = wfmt1(j?.current?.temperature_2m);
-  document.getElementById("w_wind").textContent = wfmt1(j?.current?.wind_speed_10m);
-
+  document.getElementById("w_wind").textContent = wfmt1(windToMs(j?.current?.wind_speed_10m));
+function windToMs(v){
+  const n = Number(v);
+  if (!Number.isFinite(n)) return NaN;
+  // If it's suspiciously high for m/s (e.g., 24.8), it might be km/h.
+  // Convert if above 20 (very rare sustained m/s in forecasts).
+  return (n > 20) ? (n / 3.6) : n;
+}
   const hTime = j?.hourly?.time || [];
   const hTemp = j?.hourly?.temperature_2m || [];
   const hPrec = j?.hourly?.precipitation || [];
@@ -630,8 +664,8 @@ async function loadWeather(){
 
   document.getElementById("w_updated").textContent =
     `• uuendatud (fetch) ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
-
-  const blocks = build6hBlocks(hTime, hTemp, hPrec, hWind, hCode);
+const hWindMs = (hWind || []).map(windToMs);
+  const blocks = build6hBlocks(hTime, hTemp, hPrec, hWindMs, hCode);
 drawWeatherForecaLike(blocks.labelsHour, blocks.dayTop, blocks.temps, blocks.precip6h, blocks.winds, blocks.icons);
 }
 
