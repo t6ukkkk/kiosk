@@ -648,7 +648,7 @@ function drawWeatherForecaLike(series){
     if (weatherForecaChart) { weatherForecaChart.destroy(); weatherForecaChart = null; }
     return;
   }
-
+}
   const maxP = Math.max(0, ...precipBars.map(p => p.y).filter(v => Number.isFinite(v)));
   const pMax = maxP > 10 ? nextStep2(maxP) : 10;
 
