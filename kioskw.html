@@ -628,11 +628,18 @@ function renderWeatherIfVisible(){
 }
 
 function drawWeatherForecaLike(series){
+  function drawWeatherForecaLike(series){
   const errEl = document.getElementById("w_error");
   if (errEl) errEl.textContent = "";
 
   const canvas = document.getElementById("weatherForecaChart");
   if (!canvas) return;
+
+  // HARD cleanup
+  const existing = Chart.getChart(canvas);
+  if (existing) existing.destroy();
+  if (weatherForecaChart) { try { weatherForecaChart.destroy(); } catch {} }
+  weatherForecaChart = null;
 
   const { tempLine, precipBars, iconMarks, windMarks, dayMarks } = series;
 
@@ -701,10 +708,20 @@ function drawWeatherForecaLike(series){
             padding: 26,
             callback: (v) => pad2(((v % 24) + 24) % 24)
           },
-          grid: {
-            lineWidth: (ctx) => (ctx.tick.value % 24 === 0 ? 2 : 1),
-            color: (ctx) => (ctx.tick.value % 24 === 0 ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.08)")
-          }
+grid: {
+  lineWidth: (c) => {
+    const v = (c && c.tick && typeof c.tick.value === "number") ? c.tick.value
+            : (c && typeof c.value === "number") ? c.value
+            : 0;
+    return (v % 24 === 0) ? 2 : 1;
+  },
+  color: (c) => {
+    const v = (c && c.tick && typeof c.tick.value === "number") ? c.tick.value
+            : (c && typeof c.value === "number") ? c.value
+            : 0;
+    return (v % 24 === 0) ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.08)";
+  }
+}
         },
         yT: {
           position: "left",
