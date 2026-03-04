@@ -640,18 +640,18 @@ function drawWeatherForecaLike(series){
   if (existing) existing.destroy();
   if (weatherForecaChart) { try { weatherForecaChart.destroy(); } catch {} }
   weatherForecaChart = null;
+    
+const { tempLine, precipBars, iconMarks, windMarks, dayMarks } = series || {};
 
-  const { tempLine, precipBars, iconMarks, windMarks, dayMarks } = series;
 
   if (!tempLine || tempLine.length < 2) {
-    if (errEl) errEl.textContent = "Viga: Weather series tühi (aegade sobitamine ebaõnnestus).";
-    if (weatherForecaChart) { weatherForecaChart.destroy(); weatherForecaChart = null; }
+    if (errEl) errEl.textContent = "Viga: Weather series tühi.";
     return;
   }
-}
-  const maxP = Math.max(0, ...precipBars.map(p => p.y).filter(v => Number.isFinite(v)));
-  const pMax = maxP > 10 ? nextStep2(maxP) : 10;
 
+  const maxP = Math.max(0, ...(precipBars || []).map(p => p.y).filter(v => Number.isFinite(v)));
+  const pMax = maxP > 10 ? nextStep2(maxP) : 10;
+    
   if (weatherForecaChart) weatherForecaChart.destroy();
 
   weatherForecaChart = new Chart(canvas.getContext("2d"), {
