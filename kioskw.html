@@ -743,7 +743,7 @@ grid: {
   // ensure paint after layout settles
   setTimeout(() => { try { weatherForecaChart.resize(); } catch {} }, 0);
 }
-
+}
 async function loadWeather(){
   const errEl = document.getElementById("w_error");
   if (errEl) errEl.textContent = "";
