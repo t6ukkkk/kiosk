@@ -37,36 +37,36 @@
       .grid{grid-template-columns:repeat(2,minmax(140px,1fr));}
     }
 
-/* ===================== WEATHER: KEEP DARK PAGE, LIGHTER CHART ONLY ===================== */
-#screen-weather{
-  background:#0b0b0c;
-  color:#eaeaea;
-  min-height:100vh;
-}
-#screen-weather header{
-  background:#0b0b0c;
-  border-bottom:1px solid #222;
-}
-#screen-weather .pill{
-  background:#16181a;
-  border:1px solid #2a2d31;
-  color:#eaeaea;
-}
-#screen-weather .muted{ opacity:.75; color:#eaeaea; }
-#screen-weather .card{
-  background:#121416;
-  border:1px solid #24282d;
-  color:#eaeaea;
-}
-#screen-weather .err{ color:#ff6b6b; }
+    /* ===================== WEATHER: KEEP DARK PAGE, LIGHTER CHART ONLY ===================== */
+    #screen-weather{
+      background:#0b0b0c;
+      color:#eaeaea;
+      min-height:100vh;
+    }
+    #screen-weather header{
+      background:#0b0b0c;
+      border-bottom:1px solid #222;
+    }
+    #screen-weather .pill{
+      background:#16181a;
+      border:1px solid #2a2d31;
+      color:#eaeaea;
+    }
+    #screen-weather .muted{ opacity:.75; color:#eaeaea; }
+    #screen-weather .card{
+      background:#121416;
+      border:1px solid #24282d;
+      color:#eaeaea;
+    }
+    #screen-weather .err{ color:#ff6b6b; }
 
-/* chart container itself slightly grey */
-#screen-weather .chartWrap{
-  background:#dcdde1;           /* slightly grey like you asked */
-  border:1px solid #b8bac2;
-  border-radius:14px;
-  padding:10px;
-}
+    /* chart container itself slightly grey */
+    #screen-weather .chartWrap{
+      background:#dcdde1;
+      border:1px solid #b8bac2;
+      border-radius:14px;
+      padding:10px;
+    }
   </style>
 </head>
 
@@ -135,7 +135,7 @@ let currentBarIndex = -1;
 
 let latest = { labels: [], data: [], tsList: [] };
 
-// fetch JSON every 30 minutes (matches your pill now)
+// fetch JSON every 30 minutes
 const REFRESH_MS = 30 * 60 * 1000;
 const HIGHLIGHT_MS = 15 * 1000;
 
@@ -343,16 +343,23 @@ async function loadData() {
   drawChart(labels, data);
 }
 
-/* ===================== WEATHER (Foreca-like 6h blocks) ===================== */
+/* ===================== WEATHER (Foreca-like, FIXED: 3h temp + exact 0°C crossing) ===================== */
 let weatherForecaChart;
 
-const WEATHER_REFRESH_MS = 30 * 60 * 1000; // 30 minutes
-const LAT = 59.437;     // Tallinn
+const WEATHER_REFRESH_MS = 30 * 60 * 1000;
+const LAT = 59.437;
 const LON = 24.7536;
 
 function wfmt1(n){ return (Number.isFinite(n) ? Number(n).toFixed(1) : "—"); }
+function pad2(n){ return String(n).padStart(2,"0"); }
 
-/* simple icon mapping from Open-Meteo weather_code */
+function windToMs(v){
+  const n = Number(v);
+  if (!Number.isFinite(n)) return NaN;
+  return (n > 20) ? (n / 3.6) : n;
+}
+
+/* simple icon mapping (still emoji for now; we’ll do “single combined icon” later) */
 function iconForCode(code){
   const c = Number(code);
   if (!Number.isFinite(c)) return "•";
@@ -370,106 +377,119 @@ function iconForCode(code){
   return "•";
 }
 
-function pad2(n){ return String(n).padStart(2,"0"); }
 function localHourKey(d){
-  // returns "YYYY-MM-DDTHH" in LOCAL time
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}`;
 }
 
-function build6hBlocks(timesISO, temp, precip, wind, wcode){
-  // Find first 00:00 in the provided hourly timeline (LOCAL)
-  const dates = timesISO.map(s => new Date(s));
-  let firstMidnight = dates.findIndex(d => d.getHours() === 0);
-  if (firstMidnight < 0) firstMidnight = 0;
+function nextStep2(x){
+  if (!Number.isFinite(x)) return 10;
+  return Math.ceil(x / 2) * 2;
+}
 
-  const out = {
-    labelsHour: [],
-    dayTop: [],
-    temps: [],
-    precip6h: [],
-    winds: [],
-    icons: []
-  };
-
-  const blocksPerDay = [0, 6, 12, 18];
-
-  // jump to a true midnight if possible
-  let i = firstMidnight;
-  while (i < dates.length && dates[i].getHours() !== 0) i++;
-
-  for (let day = 0; day < 7; day++){
-    if (i >= dates.length) break;
-    const base = new Date(dates[i]); // midnight
-    base.setHours(0,0,0,0);
-
-    for (const h of blocksPerDay){
-      const dt = new Date(base);
-      dt.setHours(h,0,0,0);
-
-      const key = localHourKey(dt); // "YYYY-MM-DDTHH"
-      let idx = -1;
-      for (let k = 0; k < timesISO.length; k++){
-        if (String(timesISO[k]).slice(0,13) === key) { idx = k; break; }
-      }
-      if (idx < 0) continue;
-
-      // hour label
-      out.labelsHour.push(pad2(h));
-      // day label only for 00 block, otherwise empty
-      const weekday = dt.toLocaleDateString("en-GB", { weekday: "short" }); // Tue
-      const m = dt.getMonth() + 1;
-      const dd = dt.getDate();
-      out.dayTop.push(h === 0 ? `${weekday} ${m}/${dd}` : "");
-
-      const tV = Number(temp[idx]);
-      const wV = Number(wind[idx]);
-      const cV = Number(wcode[idx]);
-
-      out.temps.push(Number.isFinite(tV) ? tV : null);
-      out.winds.push(Number.isFinite(wV) ? wV : null);
-      out.icons.push(iconForCode(cV));
-
-      // precip: sum of previous+future 3 hours => offsets -3,-2,-1,0,1,2 (6 hours)
-      let sum = 0;
-      let any = false;
-      for (const off of [-3,-2,-1,0,1,2]){
-        const j = idx + off;
-        if (j >= 0 && j < precip.length){
-          const p = Number(precip[j]);
-          if (Number.isFinite(p)) { sum += p; any = true; }
-        }
-      }
-      out.precip6h.push(any ? sum : null);
-    }
-
-    // move to next midnight
-    const next = new Date(base);
-    next.setDate(base.getDate() + 1);
-    next.setHours(0,0,0,0);
-
-    const nextKey = localHourKey(next);
-    let nextIdx = -1;
-    for (let k = 0; k < timesISO.length; k++){
-      if (String(timesISO[k]).slice(0,13) === nextKey) { nextIdx = k; break; }
-    }
-    if (nextIdx < 0) break;
-    i = nextIdx;
+/**
+ * Build:
+ * - tempLine: points every 3h (x=hours from start) + inserted 0°C crossing points at fractional x
+ * - precipBars: bars at 6h ticks (x=0,6,12,18...) value = sum of ±3h window (6h total)
+ * - windMarks/icons/dayMarks at 6h ticks for overlay drawing
+ */
+function buildWeatherSeries(timesISO, temp, precip, wind, wcode){
+  const idxByHour = new Map();
+  for (let k = 0; k < timesISO.length; k++){
+    idxByHour.set(String(timesISO[k]).slice(0,13), k);
   }
 
-  return out;
+  // find first local midnight present in data
+  const dates = timesISO.map(s => new Date(s));
+  let startIdx = dates.findIndex(d => d.getHours() === 0);
+  if (startIdx < 0) startIdx = 0;
+
+  let start = new Date(dates[startIdx]);
+  start.setHours(0,0,0,0);
+
+  const HOURS_TOTAL = 7 * 24;
+
+  // --- 3h temperature points
+  const raw3h = [];
+  for (let h = 0; h <= HOURS_TOTAL; h += 3){
+    const dt = new Date(start);
+    dt.setHours(dt.getHours() + h);
+    const idx = idxByHour.get(localHourKey(dt));
+    if (idx == null) continue;
+    const tV = Number(temp[idx]);
+    if (Number.isFinite(tV)) raw3h.push({ x: h, y: tV });
+  }
+
+  // Insert exact 0°C crossing points
+  const tempLine = [];
+  for (let i = 0; i < raw3h.length; i++){
+    const a = raw3h[i];
+    tempLine.push(a);
+    const b = raw3h[i + 1];
+    if (!b) continue;
+
+    if ((a.y > 0 && b.y < 0) || (a.y < 0 && b.y > 0)){
+      const t = a.y / (a.y - b.y);     // fraction between a and b where y=0
+      const x0 = a.x + (b.x - a.x) * t;
+      tempLine.push({ x: x0, y: 0 });
+    }
+  }
+
+  // --- 6h marks for bars/icons/wind/day labels
+  const precipBars = [];
+  const windMarks  = [];
+  const iconMarks  = [];
+  const dayMarks   = [];
+
+  for (let h = 0; h <= HOURS_TOTAL; h += 6){
+    const dt = new Date(start);
+    dt.setHours(dt.getHours() + h);
+    const idx = idxByHour.get(localHourKey(dt));
+    if (idx == null) continue;
+
+    const hour = dt.getHours();
+    if (hour === 0){
+      const weekday = dt.toLocaleDateString("en-GB", { weekday: "short" });
+      const m = dt.getMonth() + 1;
+      const dd = dt.getDate();
+      dayMarks.push({ x: h, text: `${weekday} ${m}/${dd}` });
+    }
+
+    // icon (6h)
+    const cV = Number(wcode[idx]);
+    iconMarks.push({ x: h, icon: iconForCode(cV) });
+
+    // wind (6h)
+    const wV = Number(wind[idx]);
+    windMarks.push({ x: h, y: Number.isFinite(wV) ? wV : null });
+
+    // precip (6h window around idx): offsets -3,-2,-1,0,1,2
+    let sum = 0;
+    let any = false;
+    for (const off of [-3,-2,-1,0,1,2]){
+      const j = idx + off;
+      if (j >= 0 && j < precip.length){
+        const p = Number(precip[j]);
+        if (Number.isFinite(p)) { sum += p; any = true; }
+      }
+    }
+    precipBars.push({ x: h, y: any ? sum : null });
+  }
+
+  return { start, tempLine, precipBars, windMarks, iconMarks, dayMarks };
 }
+
 const forecaStyleOverlay = {
   id: "forecaStyleOverlay",
   afterDraw(chart, args, opts){
     const { ctx, chartArea } = chart;
     if (!chartArea) return;
 
-    const icons = opts?.icons || [];
-    const winds = opts?.winds || [];
-    const dayTop = opts?.dayTop || [];
-
     const xScale = chart.scales?.x;
     if (!xScale) return;
+
+    const iconMarks = opts?.iconMarks || [];
+    const windMarks = opts?.windMarks || [];
+    const dayMarks  = opts?.dayMarks || [];
 
     ctx.save();
     ctx.textAlign = "center";
@@ -478,33 +498,31 @@ const forecaStyleOverlay = {
     // Day labels (top-most)
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#111";
-    for (let i = 0; i < chart.data.labels.length; i++){
-      const txt = dayTop[i];
-      if (!txt) continue;
-      const x = xScale.getPixelForTick(i);
-      ctx.fillText(txt, x, chartArea.top - 58);
+    for (const m of dayMarks){
+      const x = xScale.getPixelForValue(m.x);
+      ctx.fillText(m.text, x, chartArea.top - 58);
     }
 
     // Icons row (below hour ticks)
     ctx.font = "16px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#111";
-    for (let i = 0; i < chart.data.labels.length; i++){
-      const x = xScale.getPixelForTick(i);
-     ctx.fillText(icons[i] ?? "•", x, chartArea.top - 10);
+    for (const m of iconMarks){
+      const x = xScale.getPixelForValue(m.x);
+      ctx.fillText(m.icon ?? "•", x, chartArea.top - 10);
     }
 
-    // Wind row (bottom) - BLACK text
+    // Wind row (bottom) - BLACK
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#111";
-    for (let i = 0; i < chart.data.labels.length; i++){
-      const x = xScale.getPixelForTick(i);
-      const w = winds[i];
-      const txt = Number.isFinite(w) ? String(Math.round(w)) : "—";
+    for (const m of windMarks){
+      const x = xScale.getPixelForValue(m.x);
+      const txt = Number.isFinite(m.y) ? String(Math.round(m.y)) : "—";
       ctx.fillText(txt, x, chartArea.bottom + 30);
     }
 
     // units
     ctx.textAlign = "left";
+    ctx.fillStyle = "#111";
     ctx.fillText("m/s", chartArea.left, chartArea.bottom + 30);
 
     ctx.fillStyle = "#2a70ff";
@@ -518,7 +536,8 @@ const forecaStyleOverlay = {
     ctx.restore();
   }
 };
-  const zeroCLinePlugin = {
+
+const zeroCLinePlugin = {
   id: "zeroCLine",
   afterDraw(chart){
     const yT = chart.scales?.yT;
@@ -540,49 +559,54 @@ const forecaStyleOverlay = {
     ctx.restore();
   }
 };
-  function nextStep2(x){
-  if (!Number.isFinite(x)) return 10;
-  return Math.ceil(x / 2) * 2;
-}
-function drawWeatherForecaLike(labelsHour, dayTop, temps, precip6h, winds, icons){
+
+function drawWeatherForecaLike(series){
   const canvas = document.getElementById("weatherForecaChart");
   if (!canvas) return;
 
-  if (weatherForecaChart) weatherForecaChart.destroy();
-  const maxP = Math.max(0, ...precip6h.filter(v => Number.isFinite(v)));
-const pMax = maxP > 10 ? nextStep2(maxP) : 10;
+  // hard cleanup in case anything crashed earlier
+  const existing = Chart.getChart(canvas);
+  if (existing) existing.destroy();
+  if (weatherForecaChart) { try { weatherForecaChart.destroy(); } catch {} }
+  weatherForecaChart = null;
+
+  const { tempLine, precipBars, windMarks, iconMarks, dayMarks } = series;
+
+  const maxP = Math.max(0, ...precipBars.map(p => p.y).filter(v => Number.isFinite(v)));
+  const pMax = maxP > 10 ? nextStep2(maxP) : 10;
 
   weatherForecaChart = new Chart(canvas, {
     data: {
-      labels: labelsHour,
       datasets: [
+        // precip bars at 6h ticks
         {
           type: "bar",
           yAxisID: "yP",
-          data: precip6h,
+          data: precipBars.filter(p => Number.isFinite(p.y)),
+          parsing: false,
           backgroundColor: "rgba(60,130,255,0.55)",
           borderWidth: 0,
-          barPercentage: 0.9,
-          categoryPercentage: 0.95
+          barThickness: 22
         },
-  {
-  type: "line",
-  yAxisID: "yT",
-  data: temps.map(v => (Number.isFinite(v) && v >= 0) ? v : null),
-  tension: 0.35,
-  pointRadius: 0,
-  borderWidth: 2,
-  borderColor: "#d92626"
-},
-{
-  type: "line",
-  yAxisID: "yT",
-  data: temps.map(v => (Number.isFinite(v) && v < 0) ? v : null),
-  tension: 0.35,
-  pointRadius: 0,
-  borderWidth: 2,
-  borderColor: "#1f77ff"
-}
+        // temperature line: single dataset, colored by segment
+        {
+          type: "line",
+          yAxisID: "yT",
+          data: tempLine,
+          parsing: false,
+          tension: 0.35,
+          pointRadius: 0,
+          borderWidth: 2,
+          spanGaps: true,
+          segment: {
+            borderColor: (ctx) => {
+              const y0 = ctx.p0.parsed.y;
+              const y1 = ctx.p1.parsed.y;
+              const mid = (y0 + y1) / 2;
+              return (mid < 0) ? "#1f77ff" : "#d92626";
+            }
+          }
+        }
       ]
     },
     options: {
@@ -591,48 +615,48 @@ const pMax = maxP > 10 ? nextStep2(maxP) : 10;
       animation: false,
       plugins: {
         legend: { display: false },
-        forecaStyleOverlay: { icons, winds, dayTop }
+        forecaStyleOverlay: { windMarks, iconMarks, dayMarks }
       },
-     layout: { padding: { top: 78, bottom: 54, left: 10, right: 10 } },
+      layout: { padding: { top: 78, bottom: 54, left: 10, right: 10 } },
       scales: {
         x: {
-          position: "top",           // <-- hours at top
+          type: "linear",
+          position: "top",
+          min: 0,
+          max: 7 * 24,
           ticks: {
             color: "#111",
-            autoSkip: false,
-            maxRotation: 0,
-            minRotation: 0,
-            font: { size: 11 },
-            padding: 26             // create space between ticks and icons
+            stepSize: 6,
+            padding: 26,
+            callback: (v) => pad2(((v % 24) + 24) % 24)
           },
           grid: {
-  lineWidth: (ctx) => {
-    const label = ctx.chart.data.labels[ctx.index];
-    return label === "00" ? 2 : 1;
-  },
-  color: (ctx) => {
-    const label = ctx.chart.data.labels[ctx.index];
-    return label === "00"
-      ? "rgba(0,0,0,0.35)"   // darker midnight divider
-      : "rgba(0,0,0,0.08)";  // normal grid
-  }
-}
+            lineWidth: (c) => {
+              const v = (c && c.tick && typeof c.tick.value === "number") ? c.tick.value
+                      : (c && typeof c.value === "number") ? c.value
+                      : 0;
+              return (v % 24 === 0) ? 2 : 1;
+            },
+            color: (c) => {
+              const v = (c && c.tick && typeof c.tick.value === "number") ? c.tick.value
+                      : (c && typeof c.value === "number") ? c.value
+                      : 0;
+              return (v % 24 === 0) ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.08)";
+            }
+          }
         },
         yT: {
           position: "left",
           ticks: { color: "#111" },
           grid: { color: "rgba(0,0,0,0.10)" }
         },
-yP: {
-  position: "right",
-  min: 0,
-  suggestedMax: pMax,
-  ticks: {
-    color: "#2a70ff",
-    stepSize: 2
-  },
-  grid: { drawOnChartArea: false }
-}
+        yP: {
+          position: "right",
+          min: 0,
+          suggestedMax: pMax,
+          ticks: { color: "#2a70ff", stepSize: 2 },
+          grid: { drawOnChartArea: false }
+        }
       }
     },
     plugins: [forecaStyleOverlay, zeroCLinePlugin]
@@ -643,55 +667,56 @@ async function loadWeather(){
   const errEl = document.getElementById("w_error");
   if (errEl) errEl.textContent = "";
 
-  // Open-Meteo hourly; 7 days; local timezone
-  const url =
-  "https://api.open-meteo.com/v1/forecast" +
-  `?latitude=${LAT}&longitude=${LON}` +
-  "&current=temperature_2m,wind_speed_10m" +
-  "&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code" +
-  "&wind_speed_unit=ms" +
-  "&timezone=Europe%2FTallinn" +
-  "&forecast_days=7" +
-  "&t=" + Date.now();
-  
-  const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error("Weather HTTP " + r.status);
-  const j = await r.json();
+  try {
+    const url =
+      "https://api.open-meteo.com/v1/forecast" +
+      `?latitude=${LAT}&longitude=${LON}` +
+      "&current=temperature_2m,wind_speed_10m" +
+      "&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code" +
+      "&wind_speed_unit=ms" +
+      "&timezone=Europe%2FTallinn" +
+      "&forecast_days=7" +
+      "&t=" + Date.now();
 
-  const now = new Date();
-  document.getElementById("w_now").textContent  = wfmt1(j?.current?.temperature_2m);
-  document.getElementById("w_wind").textContent = wfmt1(windToMs(j?.current?.wind_speed_10m));
-function windToMs(v){
-  const n = Number(v);
-  if (!Number.isFinite(n)) return NaN;
-  // If it's suspiciously high for m/s (e.g., 24.8), it might be km/h.
-  // Convert if above 20 (very rare sustained m/s in forecasts).
-  return (n > 20) ? (n / 3.6) : n;
-}
-  const hTime = j?.hourly?.time || [];
-  const hTemp = j?.hourly?.temperature_2m || [];
-  const hPrec = j?.hourly?.precipitation || [];
-  const hWind = j?.hourly?.wind_speed_10m || [];
-  const hCode = j?.hourly?.weather_code || [];
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) throw new Error("Weather HTTP " + r.status);
+    const j = await r.json();
 
-  // 1h precip + next hour temp (best effort)
-  const isoLocalHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours())
-    .toISOString().slice(0,13);
-  let hIdx = hTime.findIndex(t => String(t).slice(0,13) === isoLocalHour);
-  if (hIdx < 0) hIdx = 0;
+    const now = new Date();
 
-  document.getElementById("w_precip").textContent = wfmt1(Number(hPrec[hIdx]));
-  document.getElementById("w_next").textContent   = wfmt1(Number(hTemp[hIdx + 1]));
+    const hTime = j?.hourly?.time || [];
+    const hTemp = j?.hourly?.temperature_2m || [];
+    const hPrec = j?.hourly?.precipitation || [];
+    const hWind = j?.hourly?.wind_speed_10m || [];
+    const hCode = j?.hourly?.weather_code || [];
 
-  document.getElementById("w_updated").textContent =
-    `• uuendatud (fetch) ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
-const hWindMs = (hWind || []).map(windToMs);
-  const blocks = build6hBlocks(hTime, hTemp, hPrec, hWindMs, hCode);
-drawWeatherForecaLike(blocks.labelsHour, blocks.dayTop, blocks.temps, blocks.precip6h, blocks.winds, blocks.icons);
+    document.getElementById("w_now").textContent  = wfmt1(j?.current?.temperature_2m);
+    document.getElementById("w_wind").textContent = wfmt1(windToMs(j?.current?.wind_speed_10m));
+
+    // current hour index by local key
+    const keyNow = localHourKey(now);
+    let hIdx = hTime.findIndex(t => String(t).slice(0,13) === keyNow);
+    if (hIdx < 0) hIdx = 0;
+
+    document.getElementById("w_precip").textContent = wfmt1(Number(hPrec[hIdx]));
+    document.getElementById("w_next").textContent   = wfmt1(Number(hTemp[hIdx + 1]));
+
+    document.getElementById("w_updated").textContent =
+      `• uuendatud (fetch) ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+
+    const hWindMs = (hWind || []).map(windToMs);
+
+    const series = buildWeatherSeries(hTime, hTemp, hPrec, hWindMs, hCode);
+    drawWeatherForecaLike(series);
+
+  } catch(e){
+    if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
+    throw e;
+  }
 }
 
 /* ===================== SCREEN ROTATION ===================== */
-const ROTATE_MS = 0.25 * 60 * 1000; // 5 minutes
+const ROTATE_MS = 0.25 * 60 * 1000; // 15 seconds (0.25 min) as you said intentional
 let showing = 0; // 0=electricity, 1=weather
 
 function showScreen(i){
