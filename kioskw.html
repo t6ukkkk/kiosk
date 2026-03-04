@@ -392,6 +392,212 @@ function nextStep2(x){
  * - precipBars: bars at 6h ticks (x=0,6,12,18...) value = sum of ±3h window (6h total)
  * - windMarks/icons/dayMarks at 6h ticks for overlay drawing
  */
+
+  // ---- Sunrise / Sunset helpers (Open-Meteo daily arrays) ----
+function ymdLocal(d){
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+}
+
+function buildSunMap(daily){
+  // daily.time, daily.sunrise, daily.sunset are ISO strings in requested timezone
+  const map = new Map();
+  const times = daily?.time || [];
+  const rises = daily?.sunrise || [];
+  const sets  = daily?.sunset || [];
+  for (let i = 0; i < times.length; i++){
+    const key = String(times[i]).slice(0,10); // YYYY-MM-DD
+    const sr = rises[i] ? new Date(rises[i]) : null;
+    const ss = sets[i]  ? new Date(sets[i])  : null;
+    map.set(key, { sunrise: sr, sunset: ss });
+  }
+  return map;
+}
+
+function isNightAt(dt, sunMap){
+  const key = ymdLocal(dt);
+  const rec = sunMap?.get(key);
+  if (!rec?.sunrise || !rec?.sunset) {
+    // fallback: treat 22-05 as night if sunrise/sunset missing
+    const h = dt.getHours();
+    return (h < 6 || h >= 22);
+  }
+  return (dt < rec.sunrise || dt >= rec.sunset);
+}
+
+// ---- Canvas icon drawing (single "depth" icon) ----
+function drawCloud(ctx, cx, cy, s){
+  ctx.save();
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#111";
+  ctx.lineWidth = Math.max(1, s * 0.10);
+
+  // a simple cloud made of circles + base
+  ctx.beginPath();
+  ctx.arc(cx - 10*s, cy, 7*s, Math.PI*0.5, Math.PI*1.5);
+  ctx.arc(cx - 2*s,  cy - 6*s, 9*s, Math.PI*1.0, Math.PI*2.0);
+  ctx.arc(cx + 10*s, cy, 7*s, Math.PI*1.5, Math.PI*0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // base
+  ctx.beginPath();
+  ctx.roundRect(cx - 18*s, cy, 36*s, 10*s, 5*s);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawSun(ctx, cx, cy, s){
+  ctx.save();
+  ctx.fillStyle = "#ffcc33";
+  ctx.strokeStyle = "#111";
+  ctx.lineWidth = Math.max(1, s * 0.10);
+
+  // rays
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++){
+    const a = (Math.PI*2*i)/8;
+    const r1 = 10*s, r2 = 15*s;
+    ctx.moveTo(cx + Math.cos(a)*r1, cy + Math.sin(a)*r1);
+    ctx.lineTo(cx + Math.cos(a)*r2, cy + Math.sin(a)*r2);
+  }
+  ctx.stroke();
+
+  // disc
+  ctx.beginPath();
+  ctx.arc(cx, cy, 9*s, 0, Math.PI*2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawMoon(ctx, cx, cy, s){
+  ctx.save();
+  ctx.fillStyle = "#ffcc33";
+  ctx.strokeStyle = "#111";
+  ctx.lineWidth = Math.max(1, s * 0.10);
+
+  // crescent: draw big circle then "cut" with background using globalCompositeOperation
+  ctx.beginPath();
+  ctx.arc(cx, cy, 9*s, 0, Math.PI*2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.beginPath();
+  ctx.arc(cx + 4*s, cy - 1*s, 9*s, 0, Math.PI*2);
+  ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+
+  // outline again
+  ctx.beginPath();
+  ctx.arc(cx, cy, 9*s, 0, Math.PI*2);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawRain(ctx, cx, cy, s){
+  ctx.save();
+  ctx.strokeStyle = "#2a70ff";
+  ctx.lineWidth = Math.max(1, s * 0.12);
+  for (let i = -1; i <= 1; i++){
+    ctx.beginPath();
+    ctx.moveTo(cx + i*6*s, cy + 6*s);
+    ctx.lineTo(cx + i*6*s - 2*s, cy + 12*s);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawLightning(ctx, cx, cy, s){
+  ctx.save();
+  ctx.fillStyle = "#ffcc33";
+  ctx.strokeStyle = "#111";
+  ctx.lineWidth = Math.max(1, s * 0.10);
+  ctx.beginPath();
+  ctx.moveTo(cx + 3*s, cy + 4*s);
+  ctx.lineTo(cx - 1*s, cy + 12*s);
+  ctx.lineTo(cx + 3*s, cy + 12*s);
+  ctx.lineTo(cx - 3*s, cy + 20*s);
+  ctx.lineTo(cx + 1*s, cy + 12*s);
+  ctx.lineTo(cx - 2*s, cy + 12*s);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawIcon(ctx, x, y, code, night){
+  // x,y are center-ish positions in pixels
+  const c = Number(code);
+  const s = 1; // scale unit
+  // baseline sizes tuned for your current overlay font size
+  const S = 1.0;
+
+  // categorize
+  const isClear = (c === 0);
+  const isPartly = (c === 1 || c === 2);
+  const isCloud = (c === 3);
+  const isFog = (c === 45 || c === 48);
+  const isRain = (c >= 51 && c <= 57) || (c >= 61 && c <= 67) || (c >= 80 && c <= 82);
+  const isSnow = (c >= 71 && c <= 77) || (c >= 85 && c <= 86);
+  const isThunder = (c >= 95 && c <= 99);
+
+  // draw order creates "depth": celestial behind cloud when needed
+  if (isClear){
+    night ? drawMoon(ctx, x, y, 0.9*S) : drawSun(ctx, x, y, 0.9*S);
+    return;
+  }
+
+  if (isPartly){
+    // celestial behind, cloud in front (moon partly covered)
+    night ? drawMoon(ctx, x - 6, y - 2, 0.85*S) : drawSun(ctx, x - 6, y - 2, 0.85*S);
+    drawCloud(ctx, x + 2, y + 2, 0.9*S);
+    return;
+  }
+
+  if (isCloud || isFog){
+    drawCloud(ctx, x, y + 2, 1.0*S);
+    return;
+  }
+
+  if (isThunder){
+    drawCloud(ctx, x, y + 2, 1.0*S);
+    drawLightning(ctx, x + 6, y + 2, 0.8*S);
+    // optional little rain
+    drawRain(ctx, x - 2, y + 4, 0.7*S);
+    return;
+  }
+
+  if (isSnow){
+    drawCloud(ctx, x, y + 2, 1.0*S);
+    // simple snow dots
+    ctx.save();
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#111";
+    ctx.lineWidth = 1;
+    for (let i = -1; i <= 1; i++){
+      ctx.beginPath();
+      ctx.arc(x + i*6, y + 14, 2.0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+
+  if (isRain){
+    drawCloud(ctx, x, y + 2, 1.0*S);
+    drawRain(ctx, x, y + 2, 0.9*S);
+    return;
+  }
+
+  // fallback
+  drawCloud(ctx, x, y + 2, 1.0*S);
+}
 function buildWeatherSeries(timesISO, temp, precip, wind, wcode){
   const idxByHour = new Map();
   for (let k = 0; k < timesISO.length; k++){
@@ -456,7 +662,7 @@ function buildWeatherSeries(timesISO, temp, precip, wind, wcode){
 
     // icon (6h)
     const cV = Number(wcode[idx]);
-    iconMarks.push({ x: h, icon: iconForCode(cV) });
+    iconMarks.push({ x: h, dt: new Date(dt), code: cV });
 
     // wind (6h)
     const wV = Number(wind[idx]);
@@ -503,13 +709,14 @@ const forecaStyleOverlay = {
       ctx.fillText(m.text, x, chartArea.top - 58);
     }
 
-    // Icons row (below hour ticks)
-    ctx.font = "16px -apple-system, system-ui, Segoe UI, Roboto, Arial";
-    ctx.fillStyle = "#111";
-    for (const m of iconMarks){
-      const x = xScale.getPixelForValue(m.x);
-      ctx.fillText(m.icon ?? "•", x, chartArea.top - 10);
-    }
+    // Icons row (below hour ticks) — drawn icons (single depth icon)
+const sunMap = opts?.sunMap; // passed in from drawWeatherForecaLike
+for (const m of iconMarks){
+  const px = xScale.getPixelForValue(m.x);
+  const py = chartArea.top - 12;   // icon center line
+  const night = isNightAt(m.dt, sunMap);
+  drawIcon(ctx, px, py, m.code, night);
+}
 
     // Wind row (bottom) - BLACK
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
@@ -523,7 +730,7 @@ const forecaStyleOverlay = {
     // units
     ctx.textAlign = "left";
     ctx.fillStyle = "#111";
-    ctx.fillText("m/s", chartArea.left, chartArea.bottom + 30);
+    ctx.fillText("m/s", chartArea.left - 20, chartArea.bottom + 30);
 
     ctx.fillStyle = "#2a70ff";
     ctx.textAlign = "right";
@@ -614,9 +821,9 @@ function drawWeatherForecaLike(series){
       maintainAspectRatio: false,
       animation: false,
       plugins: {
-        legend: { display: false },
-        forecaStyleOverlay: { windMarks, iconMarks, dayMarks }
-      },
+  legend: { display: false },
+  forecaStyleOverlay: { windMarks, iconMarks, dayMarks, sunMap: series.sunMap }
+},
       layout: { padding: { top: 78, bottom: 54, left: 10, right: 10 } },
       scales: {
         x: {
@@ -673,6 +880,7 @@ async function loadWeather(){
       `?latitude=${LAT}&longitude=${LON}` +
       "&current=temperature_2m,wind_speed_10m" +
       "&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code" +
+      "&daily=sunrise,sunset" +
       "&wind_speed_unit=ms" +
       "&timezone=Europe%2FTallinn" +
       "&forecast_days=7" +
@@ -681,6 +889,8 @@ async function loadWeather(){
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) throw new Error("Weather HTTP " + r.status);
     const j = await r.json();
+    const sunMap = buildSunMap(j?.daily);
+
 
     const now = new Date();
 
@@ -707,7 +917,11 @@ async function loadWeather(){
     const hWindMs = (hWind || []).map(windToMs);
 
     const series = buildWeatherSeries(hTime, hTemp, hPrec, hWindMs, hCode);
-    drawWeatherForecaLike(series);
+
+// attach sunrise/sunset info
+series.sunMap = sunMap;
+
+drawWeatherForecaLike(series);
 
   } catch(e){
     if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
