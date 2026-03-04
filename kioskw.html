@@ -66,6 +66,19 @@
       border:1px solid #b8bac2;
       border-radius:14px;
       padding:10px;
+      height:70vh;
+      box-sizing:border-box;
+    }
+    /* IMPORTANT: give Chart.js a stable sizing box */
+    #screen-weather .chartArea{
+      position:relative;
+      height:calc(70vh - 34px); /* leave room for the title line inside chartWrap */
+      width:100%;
+    }
+    #weatherForecaChart{
+      width:100% !important;
+      height:100% !important;
+      display:block;
     }
   </style>
 </head>
@@ -119,9 +132,11 @@
   <main>
     <div id="w_error" class="err"></div>
 
-    <div class="chartWrap" style="height:70vh;">
+    <div class="chartWrap">
       <div class="k">7 päeva (6h): temperatuur + sademed + tuul</div>
-      <canvas id="weatherForecaChart"></canvas>
+      <div class="chartArea">
+        <canvas id="weatherForecaChart"></canvas>
+      </div>
     </div>
   </main>
 </div>
@@ -132,12 +147,10 @@ const SRC = "https://cold-shape-2620.mihkel-pranstibel.workers.dev/";
 
 let chart;
 let currentBarIndex = -1;
-
 let latest = { labels: [], data: [], tsList: [] };
 
-const REFRESH_MS = 30 * 60 * 1000; // 30 min
+const REFRESH_MS = 30 * 60 * 1000;
 const HIGHLIGHT_MS = 15 * 1000;
-
 document.getElementById("refresh_s").textContent = String(Math.round(REFRESH_MS / 1000));
 
 function fmt2(n){ return (Number.isFinite(n) ? n.toFixed(2) : "—"); }
@@ -342,11 +355,13 @@ async function loadData() {
   drawChart(labels, data);
 }
 
-/* ===================== WEATHER (Foreca-like) ===================== */
-let weatherForecaChart;
+/* ===================== WEATHER ===================== */
+let weatherForecaChart = null;
+let latestWeatherSeries = null;   // <-- store series even if screen hidden
+let latestSunMap = null;
 
-const WEATHER_REFRESH_MS = 30 * 60 * 1000; // 30 minutes
-const LAT = 59.437;     // Tallinn
+const WEATHER_REFRESH_MS = 30 * 60 * 1000;
+const LAT = 59.437;
 const LON = 24.7536;
 
 function wfmt1(n){ return (Number.isFinite(n) ? Number(n).toFixed(1) : "—"); }
@@ -357,10 +372,10 @@ function localHourKey(d){
 function windToMs(v){
   const n = Number(v);
   if (!Number.isFinite(n)) return NaN;
-  return (n > 20) ? (n / 3.6) : n; // fallback if km/h ever slips in
+  return (n > 20) ? (n / 3.6) : n;
 }
 
-/* --- icon mapping (day) --- */
+/* icon mapping */
 function iconForCodeDay(code){
   const c = Number(code);
   if (!Number.isFinite(c)) return "•";
@@ -377,13 +392,11 @@ function iconForCodeDay(code){
   if (c >= 95 && c <= 99) return "⛈️";
   return "•";
 }
-
-/* --- icon mapping (night) --- */
 function iconForCodeNight(code){
   const c = Number(code);
   if (!Number.isFinite(c)) return "•";
   if (c === 0) return "🌙";
-  // "moon partly covered by cloud" -> cloud in front
+  // cloud in front of the moon (partly covered)
   if (c === 1 || c === 2) return "☁️🌙";
   if (c === 3) return "☁️";
   if (c === 45 || c === 48) return "🌫️";
@@ -393,7 +406,6 @@ function iconForCodeNight(code){
   return "🌙";
 }
 
-/* sunrise/sunset map: date -> {sunrise: Date, sunset: Date} */
 function buildSunMap(dailyTime, dailySunrise, dailySunset){
   const map = new Map();
   const n = Math.min(dailyTime?.length || 0, dailySunrise?.length || 0, dailySunset?.length || 0);
@@ -407,25 +419,21 @@ function buildSunMap(dailyTime, dailySunrise, dailySunset){
   }
   return map;
 }
-
 function isNightAt(dt, sunMap){
   const dateKey = `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}`;
-  const info = sunMap.get(dateKey);
+  const info = sunMap?.get?.(dateKey);
   if (!info) {
-    // fallback heuristic
     const h = dt.getHours();
     return (h < 6 || h >= 18);
   }
   return (dt < info.sunrise || dt >= info.sunset);
 }
 
-/* build 3h line points + 0°C crossings; keep 6h bars/icons/wind; day/night by sunrise/sunset */
 function buildWeatherSeries3h(timesISO, temp, precip, wind, wcode, sunMap){
-  if (!Array.isArray(timesISO) || !timesISO.length) {
+  if (!Array.isArray(timesISO) || timesISO.length === 0) {
     return { start: null, tempLine: [], precipBars: [], windMarks: [], iconMarks: [], dayMarks: [] };
   }
 
-  // choose a start at the first midnight in data; fallback to date[0] midnight
   const dates = timesISO.map(s => new Date(s));
   let midIdx = dates.findIndex(d => d.getHours() === 0);
   if (midIdx < 0) midIdx = 0;
@@ -433,7 +441,6 @@ function buildWeatherSeries3h(timesISO, temp, precip, wind, wcode, sunMap){
   const start = new Date(dates[midIdx]);
   start.setHours(0,0,0,0);
 
-  // map "YYYY-MM-DDTHH" -> index
   const idxByHour = new Map();
   for (let k = 0; k < timesISO.length; k++){
     idxByHour.set(String(timesISO[k]).slice(0,13), k);
@@ -448,7 +455,6 @@ function buildWeatherSeries3h(timesISO, temp, precip, wind, wcode, sunMap){
   const iconMarks  = [];
   const dayMarks   = [];
 
-  // 3h temp points
   for (let h = 0; h <= HOURS_TOTAL; h += STEP){
     const dt = new Date(start);
     dt.setHours(dt.getHours() + h);
@@ -461,7 +467,7 @@ function buildWeatherSeries3h(timesISO, temp, precip, wind, wcode, sunMap){
     if (Number.isFinite(tV)) tempPoints.push({ x: h, y: tV });
   }
 
-  // insert exact 0°C crossing points
+  // add exact 0°C crossings
   const withCrossings = [];
   for (let p = 0; p < tempPoints.length; p++){
     const a = tempPoints[p];
@@ -477,7 +483,6 @@ function buildWeatherSeries3h(timesISO, temp, precip, wind, wcode, sunMap){
     }
   }
 
-  // 6h marks for bars/icons/wind/day labels
   for (let h = 0; h <= HOURS_TOTAL; h += 6){
     const dt = new Date(start);
     dt.setHours(dt.getHours() + h);
@@ -497,15 +502,13 @@ function buildWeatherSeries3h(timesISO, temp, precip, wind, wcode, sunMap){
 
     const cV = Number(wcode[idx]);
     const night = isNightAt(dt, sunMap);
-    const icon = night ? iconForCodeNight(cV) : iconForCodeDay(cV);
-    iconMarks.push({ x: h, icon });
+    iconMarks.push({ x: h, icon: night ? iconForCodeNight(cV) : iconForCodeDay(cV) });
 
     const wV = Number(wind[idx]);
     windMarks.push({ x: h, y: Number.isFinite(wV) ? wV : null });
 
-    // precip 6h (prev+future 3 hours => total 6 hours): offsets -3..+2 hourly points
-    let sum = 0;
-    let any = false;
+    // precip bar sums 6 hours around tick (prev+future 3h) using hourly points
+    let sum = 0, any = false;
     for (const off of [-3,-2,-1,0,1,2]){
       const j = idx + off;
       if (j >= 0 && j < precip.length){
@@ -519,13 +522,11 @@ function buildWeatherSeries3h(timesISO, temp, precip, wind, wcode, sunMap){
   return { start, tempLine: withCrossings, precipBars, windMarks, iconMarks, dayMarks };
 }
 
-/* overlay: day label, icons, wind row */
 const forecaStyleOverlay = {
   id: "forecaStyleOverlay",
   afterDraw(chart, args, opts){
     const { ctx, chartArea } = chart;
     if (!chartArea) return;
-
     const xScale = chart.scales?.x;
     if (!xScale) return;
 
@@ -537,7 +538,7 @@ const forecaStyleOverlay = {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    // Day labels
+    // day labels
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#111";
     for (const m of dayMarks){
@@ -545,7 +546,7 @@ const forecaStyleOverlay = {
       ctx.fillText(m.text, x, chartArea.top - 62);
     }
 
-    // Icons (below hour ticks)
+    // icons
     ctx.font = "16px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#111";
     for (const m of iconMarks){
@@ -553,7 +554,7 @@ const forecaStyleOverlay = {
       ctx.fillText(m.icon ?? "•", x, chartArea.top - 14);
     }
 
-    // Wind row (bottom) — black
+    // wind row (bottom)
     ctx.font = "12px -apple-system, system-ui, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#111";
     for (const m of windMarks){
@@ -584,7 +585,6 @@ const zeroCLinePlugin = {
     const yT = chart.scales?.yT;
     const area = chart.chartArea;
     if (!yT || !area) return;
-
     const y0 = yT.getPixelForValue(0);
     if (!Number.isFinite(y0)) return;
     if (y0 < area.top || y0 > area.bottom) return;
@@ -606,15 +606,37 @@ function nextStep2(x){
   return Math.ceil(x / 2) * 2;
 }
 
+/* Render only when weather screen is visible */
+function isWeatherVisible(){
+  const el = document.getElementById("screen-weather");
+  if (!el) return false;
+  return (el.style.display !== "none");
+}
+
+function renderWeatherIfVisible(){
+  if (!isWeatherVisible()) return;
+  if (!latestWeatherSeries) return;
+
+  const canvas = document.getElementById("weatherForecaChart");
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  // If still zero-sized, skip; it will try again on next showScreen()
+  if (rect.width < 10 || rect.height < 10) return;
+
+  drawWeatherForecaLike(latestWeatherSeries);
+}
+
 function drawWeatherForecaLike(series){
+  const errEl = document.getElementById("w_error");
+  if (errEl) errEl.textContent = "";
+
   const canvas = document.getElementById("weatherForecaChart");
   if (!canvas) return;
 
   const { tempLine, precipBars, iconMarks, windMarks, dayMarks } = series;
 
-  // If we have no data, show an error instead of a blank chart.
   if (!tempLine || tempLine.length < 2) {
-    const errEl = document.getElementById("w_error");
     if (errEl) errEl.textContent = "Viga: Weather series tühi (aegade sobitamine ebaõnnestus).";
     if (weatherForecaChart) { weatherForecaChart.destroy(); weatherForecaChart = null; }
     return;
@@ -625,8 +647,7 @@ function drawWeatherForecaLike(series){
 
   if (weatherForecaChart) weatherForecaChart.destroy();
 
-  // IMPORTANT: root type helps stability across Chart.js versions
-  weatherForecaChart = new Chart(canvas, {
+  weatherForecaChart = new Chart(canvas.getContext("2d"), {
     type: "bar",
     data: {
       datasets: [
@@ -667,9 +688,7 @@ function drawWeatherForecaLike(series){
         legend: { display: false },
         forecaStyleOverlay: { iconMarks, windMarks, dayMarks }
       },
-      layout: {
-        padding: { top: 92, bottom: 58, left: 10, right: 10 }
-      },
+      layout: { padding: { top: 92, bottom: 58, left: 10, right: 10 } },
       scales: {
         x: {
           type: "linear",
@@ -680,10 +699,7 @@ function drawWeatherForecaLike(series){
             color: "#111",
             stepSize: 6,
             padding: 26,
-            callback: (v) => {
-              const hh = ((v % 24) + 24) % 24;
-              return pad2(hh);
-            }
+            callback: (v) => pad2(((v % 24) + 24) % 24)
           },
           grid: {
             lineWidth: (ctx) => (ctx.tick.value % 24 === 0 ? 2 : 1),
@@ -707,10 +723,8 @@ function drawWeatherForecaLike(series){
     plugins: [forecaStyleOverlay, zeroCLinePlugin]
   });
 
-  // If the chart was created while hidden, force a resize after it becomes visible.
-  setTimeout(() => {
-    try { weatherForecaChart.resize(); } catch {}
-  }, 0);
+  // ensure paint after layout settles
+  setTimeout(() => { try { weatherForecaChart.resize(); } catch {} }, 0);
 }
 
 async function loadWeather(){
@@ -741,14 +755,13 @@ async function loadWeather(){
     const hWind = j?.hourly?.wind_speed_10m || [];
     const hCode = j?.hourly?.weather_code || [];
 
-    // current cards
+    // cards
     document.getElementById("w_now").textContent  = wfmt1(j?.current?.temperature_2m);
     document.getElementById("w_wind").textContent = wfmt1(windToMs(j?.current?.wind_speed_10m));
 
-    // find current hour index by LOCAL "YYYY-MM-DDTHH"
+    // current hour index match in LOCAL time
     const keyNow =
-      `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}T${String(now.getHours()).padStart(2,"0")}`;
-
+      `${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}T${pad2(now.getHours())}`;
     let hIdx = hTime.findIndex(t => String(t).slice(0,13) === keyNow);
     if (hIdx < 0) hIdx = 0;
 
@@ -756,20 +769,19 @@ async function loadWeather(){
     document.getElementById("w_next").textContent   = wfmt1(Number(hTemp[hIdx + 1]));
 
     document.getElementById("w_updated").textContent =
-      `• uuendatud (fetch) ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+      `• uuendatud (fetch) ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
 
     // sunrise/sunset map
-    const dTime = j?.daily?.time || [];
-    const dSunR = j?.daily?.sunrise || [];
-    const dSunS = j?.daily?.sunset || [];
-    const sunMap = buildSunMap(dTime, dSunR, dSunS);
+    latestSunMap = buildSunMap(j?.daily?.time || [], j?.daily?.sunrise || [], j?.daily?.sunset || []);
 
-    // convert winds to m/s
+    // winds in m/s
     const hWindMs = (hWind || []).map(windToMs);
 
-    // build + draw series
-    const series = buildWeatherSeries3h(hTime, hTemp, hPrec, hWindMs, hCode, sunMap);
-    drawWeatherForecaLike(series);
+    // build series and store
+    latestWeatherSeries = buildWeatherSeries3h(hTime, hTemp, hPrec, hWindMs, hCode, latestSunMap);
+
+    // render if visible now; otherwise it will render when you switch to weather screen
+    renderWeatherIfVisible();
 
   } catch(e){
     if (errEl) errEl.textContent = "Viga: " + (e?.message ?? e);
@@ -791,9 +803,13 @@ function showScreen(i){
   elWea.style.display  = showElec ? "none" : "";
 
   if (showElec && chart) chart.resize();
-  if (!showElec && weatherForecaChart) {
-    // when showing weather, force resize (fixes "blank if created hidden")
-    setTimeout(() => { try { weatherForecaChart.resize(); } catch {} }, 0);
+
+  // KEY: render chart only when visible
+  if (!showElec) {
+    setTimeout(() => {
+      renderWeatherIfVisible();
+      if (weatherForecaChart) { try { weatherForecaChart.resize(); } catch {} }
+    }, 0);
   }
 }
 
