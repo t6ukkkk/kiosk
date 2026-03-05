@@ -512,8 +512,7 @@ function buildWeatherSeries(timesISO, temp, precip, wind, wcode){
 const weekday = dt.toLocaleDateString("en-GB", { weekday: "short" });
 const dd = pad2(dt.getDate());
 const mm = pad2(dt.getMonth() + 1);
-
-out.dayTop.push(h === 0 ? `${weekday} ${dd}/${mm}` : "");
+dayMarks.push(h === 0 ? `${weekday} ${dd}/${mm}` : "");
     }
 
     // icon (6h)
