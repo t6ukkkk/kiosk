@@ -508,14 +508,13 @@ function buildWeatherSeries(timesISO, temp, precip, wind, wcode){
     if (idx == null) continue;
 
     const hour = dt.getHours();
-    if (hour === 0){
-const weekday = dt.toLocaleDateString("en-GB", { weekday: "short" });
-const dd = pad2(dt.getDate());
-const mm = pad2(dt.getMonth() + 1);
-if (h === 0) {
+   if (hour === 0) {
+  const weekday = dt.toLocaleDateString("en-GB", { weekday: "short" });
+  const dd = pad2(dt.getDate());
+  const mm = pad2(dt.getMonth() + 1);
+
   dayMarks.push({ x: h, text: `${weekday} ${dd}/${mm}` });
 }
-
     // icon (6h)
     const cV = Number(wcode[idx]);
     iconMarks.push({ x: h, dt: new Date(dt), code: cV });
